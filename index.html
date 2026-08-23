@@ -53,7 +53,7 @@
       border: 3px solid #00FF00;
       border-radius: 8px;
       box-sizing: border-box;
-      padding: 12px 14px;
+      padding: 10px 14px;
       display: flex;
       flex-direction: column;
       position: relative;
@@ -92,7 +92,7 @@
 </head>
 <body>
 
-  <!-- 左側：ブラウザUI（操作パネル & プレビュー） -->
+  <!-- 左側：ブラウザUI -->
   <div class="glass-container">
     <div class="mode-tab-bar">
       <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 短文・旅行</div>
@@ -106,45 +106,41 @@
     <div id="glass-display">
       <!-- モード1: 短文・旅行 -->
       <div id="mode1Screen" class="hud-mode-screen active">
-        <div style="color:#FF5555; font-size:11px; font-weight:bold;">相手の発言</div>
-        <div id="m1-partner" style="color:#FF4444; font-size:15px; font-weight:bold; margin-bottom:2px;">Where is the nearest station?</div>
-        <div id="m1-partner-ja" style="color:#ff8888; font-size:11px; margin-bottom:4px;">一番近い駅はどこですか？</div>
+        <div style="color:#FF5555; font-size:10px; font-weight:bold;">相手の発言 (Mode 1/5)</div>
+        <div style="color:#FF4444; font-size:14px; font-weight:bold; margin-bottom:1px;">Where is the nearest station?</div>
+        <div style="color:#ff8888; font-size:10px; margin-bottom:4px;">一番近い駅はどこですか？</div>
         <div style="border-top:1px dashed #005500; margin:2px 0;"></div>
-        <div id="m1-en" style="color:#00FF00; font-size:15px; font-weight:bold;">It's a 5-minute walk from here.</div>
-        <div id="m1-kana" style="color:#00aa00; font-size:11px;">イツツア ファイブミニッツ ウォーク フロム ヒア。</div>
-        <div id="m1-ja" style="color:#009900; font-size:11px;">ここから徒歩5分です。</div>
+        <div style="color:#00FF00; font-size:14px; font-weight:bold;">It's a 5-minute walk from here.</div>
+        <div style="color:#00aa00; font-size:10px;">イツツア ファイブミニッツ ウォーク...</div>
+        <div style="color:#009900; font-size:10px;">ここから徒歩5分です。</div>
       </div>
       <!-- モード2: 相手音声 -->
       <div id="mode2Screen" class="hud-mode-screen">
-        <div style="color:#FF5555; font-size:11px;">[相手音声 全面]</div>
-        <div id="m2-en" style="color:#FF4444; font-size:15px; font-weight:bold; margin-top:6px;">Waiting for speech...</div>
-        <div id="m2-kana" style="color:#aa0000; font-size:11px;">-</div>
-        <div id="m2-ja" style="color:#009900; font-size:12px; margin-top:4px;">-</div>
+        <div style="color:#FF5555; font-size:10px; font-weight:bold;">相手音声 (Mode 2/5)</div>
+        <div id="m2-en" style="color:#FF4444; font-size:14px; font-weight:bold; margin-top:6px;">Waiting for speech...</div>
+        <div id="m2-kana" style="color:#aa0000; font-size:10px;">-</div>
+        <div id="m2-ja" style="color:#009900; font-size:10px; margin-top:4px;">-</div>
       </div>
       <!-- モード3: AI回答 -->
       <div id="mode3Screen" class="hud-mode-screen">
-        <div style="display:flex; justify-content:space-between; font-size:11px; color:#888;">
-          <span>AI回答アシスト</span>
-          <span id="page-badge-3">1/1</span>
-        </div>
+        <div style="color:#00FF00; font-size:10px; font-weight:bold;">AI回答アシスト (Mode 3/5)</div>
         <div id="m3-en" style="color:#00FF00; font-size:14px; font-weight:bold; margin-top:4px;">-</div>
-        <div id="m3-kana" style="color:#00aa00; font-size:11px;">-</div>
-        <div id="m3-ja" style="color:#888; font-size:11px; margin-top:4px;">-</div>
+        <div id="m3-kana" style="color:#00aa00; font-size:10px;">-</div>
+        <div id="m3-ja" style="color:#888; font-size:10px; margin-top:4px;">-</div>
       </div>
       <!-- モード4: フレーズ集 -->
       <div id="mode4Screen" class="hud-mode-screen">
-        <div style="color:#00FF00; font-size:11px; font-weight:bold;">フレーズ集</div>
-        <div id="m4-category" style="color:#888; font-size:10px;">Category</div>
-        <div id="m4-en" style="color:#fff; font-size:14px; font-weight:bold; margin-top:4px;">-</div>
-        <div id="m4-kana" style="color:#00aa00; font-size:11px;">-</div>
-        <div id="m4-ja" style="color:#009900; font-size:11px;">-</div>
+        <div style="color:#00FF00; font-size:10px; font-weight:bold;">フレーズ集 (Mode 4/5)</div>
+        <div id="m4-en" style="color:#fff; font-size:14px; font-weight:bold; margin-top:4px;">Can I have the check, please?</div>
+        <div id="m4-kana" style="color:#00aa00; font-size:10px;">キャン アイ ハブ ザ チェック プリーズ？</div>
+        <div id="m4-ja" style="color:#009900; font-size:10px;">お会計をお願いします。</div>
       </div>
       <!-- モード5: 自声翻訳 -->
       <div id="mode5Screen" class="hud-mode-screen">
-        <div style="color:#00FF00; font-size:11px;">[自声翻訳]</div>
-        <div id="m5-source" style="color:#fff; font-size:12px; margin-top:4px;">Speak into mic...</div>
-        <div id="m5-translated" style="color:#FF4444; font-size:14px; font-weight:bold; margin-top:4px;">-</div>
-        <div id="m5-kana" style="color:#ff8888; font-size:11px;">-</div>
+        <div style="color:#00FF00; font-size:10px; font-weight:bold;">自声翻訳 (Mode 5/5)</div>
+        <div id="m5-source" style="color:#fff; font-size:10px; margin-top:4px;">Speak into mic...</div>
+        <div id="m5-translated" style="color:#FF4444; font-size:13px; font-weight:bold; margin-top:4px;">-</div>
+        <div id="m5-kana" style="color:#ff8888; font-size:10px;">-</div>
       </div>
     </div>
   </div>
@@ -182,20 +178,20 @@
     let bridge = null;
     let currentMode = 1;
 
+    // 各モードのテキストを定義
+    const modeTexts = {
+      1: "相手の発言 (1/5):\nWhere is the nearest station?\n一番近い駅はどこですか？\n-------------------\nIt's a 5-minute walk from here.\nイツツア ファイブミニッツ ウォーク...\nここから徒歩5分です。",
+      2: "相手音声 (2/5):\nWaiting for speech...\n-\n-\n-\n-",
+      3: "AI回答アシスト (3/5):\nスタンバイ中\n-\n-\n-\n-",
+      4: "フレーズ集 (4/5):\nCan I have the check, please?\nキャン アイ ハブ ザ チェック プリーズ？\n-------------------\nお会計をお願いします。",
+      5: "自声翻訳 (5/5):\n🎤 マイク入力待機中\n-\n-\n-\n-"
+    };
+
     async function initG2() {
       try {
         document.getElementById('status').innerText = "G2ブリッジ接続中...";
         bridge = await waitForEvenAppBridge();
         
-        const initialText = 
-          "相手の発言:\n" +
-          "Where is the nearest station?\n" +
-          "(一番近い駅はどこですか？)\n" +
-          "-------------------\n" +
-          "It's a 5-minute walk from here.\n" +
-          "イツツア ファイブミニッツ ウォーク...\n" +
-          "ここから徒歩5分です。";
-
         const mainText = new TextContainerProperty({
           xPosition: 0,
           yPosition: 0,
@@ -206,7 +202,7 @@
           paddingLength: 4,
           containerID: 1,
           containerName: 'hud_main',
-          content: initialText,
+          content: modeTexts[1],
           isEventCapture: 1,
         });
 
@@ -217,10 +213,20 @@
           })
         );
 
-        document.getElementById('status').innerText = "G2 SDK 接続完了！";
+        document.getElementById('status').innerText = "G2 SDK 接続完了！(ボタンでモード切替可能)";
 
+        // グラス側からのハードウェアボタン・イベントのリスナー
         bridge.onEvenHubEvent(event => {
-          console.log("Event:", event);
+          console.log("Event received:", event);
+          
+          // クリックやメニューボタンなどの操作検知でモードをインクリメント（1〜5をループ）
+          currentMode = (currentMode % 5) + 1;
+          
+          // ブラウザ側の表示とタブを連動して切り替え
+          updateUIOnly(currentMode);
+          
+          // グラス側へテキスト送信
+          sendToG2Display(modeTexts[currentMode]);
         });
 
       } catch (e) {
@@ -243,33 +249,19 @@
       }
     }
 
-    window.switchMode = function(mode) {
-      currentMode = mode;
+    function updateUIOnly(mode) {
       document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
       document.getElementById('tab' + mode).classList.add('active');
 
       document.querySelectorAll('.hud-mode-screen').forEach(s => s.classList.remove('active'));
       document.getElementById('mode' + mode + 'Screen').classList.add('active');
+    }
 
-      if (mode === 1) {
-        const t = 
-          "相手の発言:\n" +
-          "Where is the nearest station?\n" +
-          "(一番近い駅はどこですか？)\n" +
-          "-------------------\n" +
-          "It's a 5-minute walk from here.\n" +
-          "イツツア ファイブミニッツ ウォーク...\n" +
-          "ここから徒歩5分です。";
-        sendToG2Display(t);
-      } else if (mode === 2) {
-        sendToG2Display("[相手音声 全面]\nWaiting for speech...\n-\n-");
-      } else if (mode === 3) {
-        sendToG2Display("[AI回答アシスト]\nスタンバイ中\n-\n-");
-      } else if (mode === 4) {
-        sendToG2Display("[フレーズ集]\nSelect a phrase\n-\n-");
-      } else if (mode === 5) {
-        sendToG2Display("[自声翻訳]\n🎤 待機中\n-\n-");
-      }
+    // ブラウザ上のタブをクリックした時
+    window.switchMode = function(mode) {
+      currentMode = mode;
+      updateUIOnly(currentMode);
+      sendToG2Display(modeTexts[currentMode]);
     };
 
     window.requestAI = async function() {
@@ -308,10 +300,9 @@
         document.getElementById('m3-kana').innerText = resJson.kana || '';
         document.getElementById('m3-ja').innerText = resJson.ja;
         
+        modeTexts[3] = `AI回答 (3/5):\n${resJson.en}\n${resJson.kana || ''}\n---\n${resJson.ja}`;
+        
         switchMode(3);
-
-        const glassText = `[AI回答]\n${resJson.en}\n(${resJson.kana || ''})\n---\n${resJson.ja}`;
-        sendToG2Display(glassText);
 
         document.getElementById('status').innerText = "完了！";
       } catch (e) {
@@ -333,8 +324,9 @@
         const text = event.results[0][0].transcript;
         document.getElementById('m5-source').innerText = text;
         document.getElementById('m5-translated').innerText = "Translating...";
+        
+        modeTexts[5] = `自声翻訳 (5/5):\n入力: ${text}\n翻訳中...\n-`;
         switchMode(5);
-        sendToG2Display(`[自声翻訳]\n入力: ${text}\n翻訳中...`);
         document.getElementById('status').innerText = "認識完了";
       };
       recognition.start();
