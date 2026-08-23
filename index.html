@@ -215,8 +215,8 @@
     .mic-btn.active { background: #00ff00; color: #000; }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-  <!-- Even Hub Simulator用 SDKスクリプトの読み込み -->
-  <script src="https://cdn.jsdelivr.net/npm/@evenrealities/evenhub-simulator@latest/dist/simulator-bridge.js" onerror="console.log('SDKブリッジはローカル/シミュレーター環境で動作します')"></script>
+  <!-- Even Hub Simulator Bridge SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@evenrealities/evenhub-simulator@latest/dist/simulator-bridge.js"></script>
 </head>
 <body>
 
@@ -229,7 +229,7 @@
       <div id="tab5" class="mode-tab" onclick="switchMode(5)">5: 自声翻訳</div>
     </div>
 
-    <!-- シミュレーター側がこの要素（#glass-display）の中身をグラス画面として認識・同期表示します -->
+    <!-- Glasses Display への描画用ターゲット -->
     <div id="glass-display">
       <!-- 画面1 -->
       <div id="mode1Screen" class="hud-mode-screen active">
@@ -387,6 +387,7 @@
     let recognition = null;
     let isListening = false;
 
+    // シミュレーターブリッジ初期化
     window.addEventListener('DOMContentLoaded', () => {
       const savedUrl = localStorage.getItem('prompter_site_url');
       if (savedUrl) document.getElementById('siteUrl').value = savedUrl;
@@ -398,6 +399,11 @@
       if (savedG2Key) document.getElementById('g2ApiKey').value = savedG2Key;
 
       initSpeechRecognition();
+      
+      // 初回同期
+      setTimeout(() => {
+        syncCurrentDisplayToG2();
+      }, 500);
     });
 
     function saveSiteUrl() {
@@ -410,8 +416,19 @@
       if (key) localStorage.setItem('prompter_g2_api_key', key);
     }
 
-    // シミュレーターおよび実機への送信処理（シミュレーターはDOMを自動ミラーリングするためAPIエラーを無視）
+    // シミュレーター Bridge & 実機API送信処理
     async function sendToG2Display(textToSend) {
+      // シミュレーター Bridge SDKへのカスタムイベント通知
+      if (window.EvenSimulator || window.simulatorBridge) {
+        try {
+          const bridge = window.EvenSimulator || window.simulatorBridge;
+          if (bridge.updateDisplay) {
+            bridge.updateDisplay(textToSend);
+          }
+        } catch(e) {}
+      }
+
+      // G2実機APIへの個別送信（APIキーがある場合）
       const g2ApiKey = document.getElementById('g2ApiKey').value.trim();
       if (!g2ApiKey) return;
 
@@ -428,9 +445,7 @@
             clear_previous: true
           })
         });
-      } catch (e) {
-        // シミュレーター環境ではAPIエンドポイントがないため例外が発生しますが正常です
-      }
+      } catch (e) {}
     }
 
     function switchMode(modeNum) {
@@ -449,19 +464,19 @@
         const partner = document.getElementById('m1-partner-text').innerText;
         const partnerJa = document.getElementById('m1-partner-ja').innerText;
         const en = document.getElementById('m1-en').innerText;
-        sendToG2Display(`[PARTNER]\n${partner}\n(${partnerJa})\n[MY ANSWER]\n${en}`);
+        sendToG2Display(`[PARTNER]\n${partner}\n(${partnerJa})\n\n[MY ANSWER]\n${en}`);
       } else if (currentMode === 2 && m2Pages.length > 0) {
         const p = m2Pages[m2Index];
         sendToG2Display(`[PARTNER ${m2Index+1}/${m2Pages.length}]\n${p.en}\n\n${p.ja}`);
       } else if (currentMode === 3 && m3Pages.length > 0) {
         const card = m3Pages[m3Index];
-        sendToG2Display(`${card.en}\n${card.kana}`);
+        sendToG2Display(`${card.en}\n\n${card.kana}`);
       } else if (currentMode === 4) {
         sendToG2Display("フレーズ集モード\nフレーズを選択してください");
       } else if (currentMode === 5) {
         const en = document.getElementById('m5-en').innerText;
         const kana = document.getElementById('m5-kana').innerText;
-        sendToG2Display(`${en}\n${kana}`);
+        sendToG2Display(`${en}\n\n${kana}`);
       }
     }
 
@@ -685,7 +700,7 @@
         const parsed = JSON.parse(data.choices[0].message.content.trim().replace(/```json/g, '').replace(/```/g, ''));
         document.getElementById('m5-en').innerText = parsed.en;
         document.getElementById('m5-kana').innerText = parsed.kana;
-        sendToG2Display(`${parsed.en}\n${parsed.kana}`);
+        sendToG2Display(`${parsed.en}\n\n${parsed.kana}`);
       } catch(e) {}
     }
 
@@ -721,7 +736,7 @@
         reader.onload = async function() {
           const pdf = await pdfjsLib.getDocument(new Uint8Array(this.result)).promise;
           let text = "";
-          let maxPagesToRead = Math.min(pdf.numPages, 5); // パフォーマンスのため最大5ページまで
+          let maxPagesToRead = Math.min(pdf.numPages, 5);
           for (let i = 1; i <= maxPagesToRead; i++) {
             const page = await pdf.getPage(i);
             const content = await page.getTextContent();
@@ -825,7 +840,7 @@ JSON形式:
       document.getElementById('m3-en').innerText = card.en;
       document.getElementById('m3-kana').innerText = card.kana;
       document.getElementById('m3-ja').innerText = card.ja;
-      sendToG2Display(`${card.en}\n${card.kana}`);
+      sendToG2Display(`${card.en}\n\n${card.kana}`);
     }
   </script>
 </body>
