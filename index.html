@@ -179,8 +179,6 @@
       5: "自声翻訳 (5/5):\n🎤 マイク入力待機中\n-\n-\n-\n-"
     };
 
-    const menuText = "=== システムメニュー ===\n[Menu] メニュー画面表示中\n・Clickで通常モード復帰";
-
     async function initG2() {
       try {
         document.getElementById('status').innerText = "G2ブリッジ接続中...";
@@ -209,20 +207,8 @@
 
         document.getElementById('status').innerText = "G2 SDK 接続完了";
 
-        // イベントリスナー
         bridge.onEvenHubEvent(async event => {
           console.log("Raw Event Received:", event);
-
-          // イベント内容からMenuボタンまたはそれに準ずる操作を判定
-          // SDKのイベント構造に合わせて柔軟に判定
-          const eventStr = JSON.stringify(event || {});
-          if (eventStr.includes("menu") || (event && event.jsonData && event.jsonData.containerID)) {
-            console.log("Menu action detected");
-            await sendToG2Display(menuText);
-            return;
-          }
-
-          // 通常のイベント時はモードをローテーション
           currentMode = (currentMode % 5) + 1;
           updateUIOnly(currentMode);
           await sendToG2Display(modeTexts[currentMode]);
@@ -280,25 +266,28 @@
           },
           body: JSON.stringify({
             model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: prompt + " を英語で。出力はJSON形式で {en: 英語, kana: カタカナ読み, ja: 和訳} のみで返して" }]
+            messages: [{ role: 'user', content: prompt + " を英語に翻訳し、英訳・カタカナ読み・日本語をJSON形式（キー: en, kana, ja）で返してください。" }]
           })
         });
         const data = await response.json();
         const rawContent = data.choices[0].message.content;
+        console.log("AI Raw Response:", rawContent);
         
-        let resJson = { en: prompt, kana: "よみかた", ja: rawContent };
+        let resJson = { en: "", kana: "", ja: rawContent };
         try {
           const cleanJson = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
           resJson = JSON.parse(cleanJson);
         } catch(err) {
-          resJson.ja = rawContent;
+          console.warn("JSON parse failed, falling back to raw text");
         }
 
-        document.getElementById('m3-en').innerText = resJson.en;
+        // 画面（UI）側の更新
+        document.getElementById('m3-en').innerText = resJson.en || prompt;
         document.getElementById('m3-kana').innerText = resJson.kana || '';
-        document.getElementById('m3-ja').innerText = resJson.ja;
+        document.getElementById('m3-ja').innerText = resJson.ja || rawContent;
         
-        modeTexts[3] = `AI回答 (3/5):\n${resJson.en}\n${resJson.kana || ''}\n---\n${resJson.ja}`;
+        // グラス（レンズ）側のテキストを作成して送信
+        modeTexts[3] = `AI回答 (3/5):\n${resJson.en || prompt}\n${resJson.kana || ''}\n-------------------\n${resJson.ja || rawContent}`;
         switchMode(3);
 
         document.getElementById('status').innerText = "完了！";
