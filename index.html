@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator & App</title>
+  <title>EVEN G2 Translator App</title>
   <style>
     body {
       background-color: #111;
@@ -92,7 +92,7 @@
 </head>
 <body>
 
-  <!-- 左側：ブラウザUI -->
+  <!-- 左側：ブラウザシミュレーションUI -->
   <div class="glass-container">
     <div class="mode-tab-bar">
       <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 短文・旅行</div>
@@ -102,8 +102,8 @@
       <div id="tab5" class="mode-tab" onclick="switchMode(5)">5: 自声翻訳</div>
     </div>
 
-    <!-- グラス表示再現エリア -->
     <div id="glass-display">
+      <!-- モード1画面 -->
       <div id="mode1Screen" class="hud-mode-screen active">
         <div style="color:#FF5555; font-size:10px; font-weight:bold;">相手の発言 (Mode 1/5)</div>
         <div style="color:#FF4444; font-size:14px; font-weight:bold; margin-bottom:1px;">Where is the nearest station?</div>
@@ -113,24 +113,28 @@
         <div style="color:#00aa00; font-size:10px;">イツツア ファイブミニッツ ウォーク...</div>
         <div style="color:#009900; font-size:10px;">ここから徒歩5分です。</div>
       </div>
+      <!-- モード2画面 -->
       <div id="mode2Screen" class="hud-mode-screen">
         <div style="color:#FF5555; font-size:10px; font-weight:bold;">相手音声 (Mode 2/5)</div>
         <div id="m2-en" style="color:#FF4444; font-size:14px; font-weight:bold; margin-top:6px;">Waiting for speech...</div>
         <div id="m2-kana" style="color:#aa0000; font-size:10px;">-</div>
         <div id="m2-ja" style="color:#009900; font-size:10px; margin-top:4px;">-</div>
       </div>
+      <!-- モード3画面 -->
       <div id="mode3Screen" class="hud-mode-screen">
         <div style="color:#00FF00; font-size:10px; font-weight:bold;">AI回答アシスト (Mode 3/5)</div>
         <div id="m3-en" style="color:#00FF00; font-size:14px; font-weight:bold; margin-top:4px;">-</div>
         <div id="m3-kana" style="color:#00aa00; font-size:10px;">-</div>
         <div id="m3-ja" style="color:#888; font-size:10px; margin-top:4px;">-</div>
       </div>
+      <!-- モード4画面 -->
       <div id="mode4Screen" class="hud-mode-screen">
         <div style="color:#00FF00; font-size:10px; font-weight:bold;">フレーズ集 (Mode 4/5)</div>
         <div id="m4-en" style="color:#fff; font-size:14px; font-weight:bold; margin-top:4px;">Can I have the check, please?</div>
         <div id="m4-kana" style="color:#00aa00; font-size:10px;">キャン アイ ハブ ザ チェック プリーズ？</div>
         <div style="color:#009900; font-size:10px;">お会計をお願いします。</div>
       </div>
+      <!-- モード5画面 -->
       <div id="mode5Screen" class="hud-mode-screen">
         <div style="color:#00FF00; font-size:10px; font-weight:bold;">自声翻訳 (Mode 5/5)</div>
         <div id="m5-source" style="color:#fff; font-size:10px; margin-top:4px;">Speak into mic...</div>
@@ -148,7 +152,7 @@
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
-      <label>入力テキスト (AI用 / 送信用):</label>
+      <label>入力テキスト (AI用):</label>
       <textarea id="promptInput" rows="2" style="width:100%; box-sizing:border-box;">おすすめの観光スポットを教えて</textarea>
     </div>
     <button onclick="requestAI()">AI回答生成 & グラス転送</button>
@@ -172,6 +176,7 @@
     let bridge = null;
     let currentMode = 1;
 
+    // 各モードのテキスト定義
     const modeTexts = {
       1: "相手の発言 (1/5):\nWhere is the nearest station?\n一番近い駅はどこですか？\n-------------------\nIt's a 5-minute walk from here.\nイツツア ファイブミニッツ ウォーク...\nここから徒歩5分です。",
       2: "相手音声 (2/5):\nWaiting for speech...\n-\n-\n-\n-",
@@ -179,6 +184,9 @@
       4: "フレーズ集 (4/5):\nCan I have the check, please?\nキャン アイ ハブ ザ チェック プリーズ？\n-------------------\nお会計をお願いします。",
       5: "自声翻訳 (5/5):\n🎤 マイク入力待機中\n-\n-\n-\n-"
     };
+
+    // メニュー画面用テキスト
+    const menuText = "=== システムメニュー ===\n・Menuボタン検出OK\n・Clickでモード切替に復帰";
 
     async function initG2() {
       try {
@@ -208,14 +216,14 @@
 
         document.getElementById('status').innerText = "G2 SDK 接続完了";
 
-        // イベントリスナー（Menuボタンと通常クリックの判定分岐）
+        // イベントリスナー
         bridge.onEvenHubEvent(event => {
           console.log("Raw Event Received:", event);
 
-          // Menuボタン等（コンテナイベント）が押されたときの判定
+          // Menuボタン（コンテナイベント）が押されたときの処理
           if (event && event.jsonData && event.jsonData.containerID) {
             console.log("Menu button event detected.");
-            // 必要に応じてここにアプリ終了処理などを記述できます
+            sendToG2Display(menuText);
             return;
           }
 
