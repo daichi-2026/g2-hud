@@ -103,7 +103,6 @@
     </div>
 
     <div id="glass-display">
-      <!-- モード1画面 -->
       <div id="mode1Screen" class="hud-mode-screen active">
         <div style="color:#FF5555; font-size:10px; font-weight:bold;">相手の発言 (Mode 1/5)</div>
         <div style="color:#FF4444; font-size:14px; font-weight:bold; margin-bottom:1px;">Where is the nearest station?</div>
@@ -113,28 +112,24 @@
         <div style="color:#00aa00; font-size:10px;">イツツア ファイブミニッツ ウォーク...</div>
         <div style="color:#009900; font-size:10px;">ここから徒歩5分です。</div>
       </div>
-      <!-- モード2画面 -->
       <div id="mode2Screen" class="hud-mode-screen">
         <div style="color:#FF5555; font-size:10px; font-weight:bold;">相手音声 (Mode 2/5)</div>
         <div id="m2-en" style="color:#FF4444; font-size:14px; font-weight:bold; margin-top:6px;">Waiting for speech...</div>
         <div id="m2-kana" style="color:#aa0000; font-size:10px;">-</div>
         <div id="m2-ja" style="color:#009900; font-size:10px; margin-top:4px;">-</div>
       </div>
-      <!-- モード3画面 -->
       <div id="mode3Screen" class="hud-mode-screen">
         <div style="color:#00FF00; font-size:10px; font-weight:bold;">AI回答アシスト (Mode 3/5)</div>
         <div id="m3-en" style="color:#00FF00; font-size:14px; font-weight:bold; margin-top:4px;">-</div>
         <div id="m3-kana" style="color:#00aa00; font-size:10px;">-</div>
         <div id="m3-ja" style="color:#888; font-size:10px; margin-top:4px;">-</div>
       </div>
-      <!-- モード4画面 -->
       <div id="mode4Screen" class="hud-mode-screen">
         <div style="color:#00FF00; font-size:10px; font-weight:bold;">フレーズ集 (Mode 4/5)</div>
         <div id="m4-en" style="color:#fff; font-size:14px; font-weight:bold; margin-top:4px;">Can I have the check, please?</div>
         <div id="m4-kana" style="color:#00aa00; font-size:10px;">キャン アイ ハブ ザ チェック プリーズ？</div>
         <div style="color:#009900; font-size:10px;">お会計をお願いします。</div>
       </div>
-      <!-- モード5画面 -->
       <div id="mode5Screen" class="hud-mode-screen">
         <div style="color:#00FF00; font-size:10px; font-weight:bold;">自声翻訳 (Mode 5/5)</div>
         <div id="m5-source" style="color:#fff; font-size:10px; margin-top:4px;">Speak into mic...</div>
@@ -176,7 +171,6 @@
     let bridge = null;
     let currentMode = 1;
 
-    // 各モードのテキスト定義
     const modeTexts = {
       1: "相手の発言 (1/5):\nWhere is the nearest station?\n一番近い駅はどこですか？\n-------------------\nIt's a 5-minute walk from here.\nイツツア ファイブミニッツ ウォーク...\nここから徒歩5分です。",
       2: "相手音声 (2/5):\nWaiting for speech...\n-\n-\n-\n-",
@@ -184,9 +178,6 @@
       4: "フレーズ集 (4/5):\nCan I have the check, please?\nキャン アイ ハブ ザ チェック プリーズ？\n-------------------\nお会計をお願いします。",
       5: "自声翻訳 (5/5):\n🎤 マイク入力待機中\n-\n-\n-\n-"
     };
-
-    // メニュー画面用テキスト
-    const menuText = "=== システムメニュー ===\n・Menuボタン検出OK\n・Clickでモード切替に復帰";
 
     async function initG2() {
       try {
@@ -217,17 +208,27 @@
         document.getElementById('status').innerText = "G2 SDK 接続完了";
 
         // イベントリスナー
-        bridge.onEvenHubEvent(event => {
+        bridge.onEvenHubEvent(async event => {
           console.log("Raw Event Received:", event);
 
-          // Menuボタン（コンテナイベント）が押されたときの処理
+          // Menuボタン（コンテナイベント）の判定
           if (event && event.jsonData && event.jsonData.containerID) {
-            console.log("Menu button event detected.");
-            sendToG2Display(menuText);
+            console.log("Menu button event detected -> updating display.");
+            try {
+              await bridge.textContainerUpgrade(
+                new TextContainerUpgrade({
+                  containerID: 1,
+                  containerName: 'hud_main',
+                  content: "=== システムメニュー ===\nメニュー画面を表示中\nClickで通常モードに戻る",
+                })
+              );
+            } catch (err) {
+              console.error("Menu upgrade error:", err);
+            }
             return;
           }
 
-          // 通常のクリック等の場合はモードを順番に切り替え
+          // 通常のクリック等の場合
           currentMode = (currentMode % 5) + 1;
           updateUIOnly(currentMode);
           sendToG2Display(modeTexts[currentMode]);
