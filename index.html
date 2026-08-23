@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>EVEN G2 5-Mode HUD Full Assistant</title>
+  <style>
+    body {
+      background-color: #111;
+      color: #00FF00;
+      font-family: Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    
+    .glass-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      border-right: 1px solid #333;
+      padding-right: 20px;
+    }
+
+    .mode-tab-bar {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      width: 576px;
+    }
+    .mode-tab {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #00AA00;
+      color: #00FF00;
+      padding: 6px 2px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .mode-tab.active {
+      background: #00FF00;
+      color: #000;
+      box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+    }
+
+    #glass-display {
+      width: 576px;
+      height: 288px;
+      background-color: #000;
+      border: 3px solid #00FF00;
+      border-radius: 8px;
+      box-sizing: border-box;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hud-mode-screen {
+      display: none;
+      height: 100%;
+      flex-direction: column;
+      position: relative;
+    }
+    .hud-mode-screen.active {
+      display: flex;
+    }
+
+    .page-badge {
+      position: absolute;
+      top: 0;
+      right: 0;
+      font-size: 10px;
+      background: #004400;
+      color: #00FF00;
+      padding: 2px 6px;
+      border-radius: 3px;
+      border: 1px solid #00AA00;
+      z-index: 10;
+    }
+    .page-badge.red {
+      background: #440000;
+      color: #FF5555;
+      border-color: #AA0000;
+    }
+
+    /* MODE 1 */
+    .m1-partner-part {
+      height: 45%;
+      border-bottom: 1px dashed #551111;
+      padding-bottom: 4px;
+      overflow-y: auto;
+    }
+    .m1-my-part {
+      height: 55%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding-top: 4px;
+    }
+
+    /* MODE 2 */
+    .m2-full-partner {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      overflow: hidden;
+      padding-right: 30px;
+    }
+
+    /* MODE 3 */
+    .m3-full-ai {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding-right: 30px;
+    }
+
+    /* MODE 4 */
+    .preset-list {
+      list-style: none;
+      padding: 0;
+      margin: 8px 0 0 0;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      overflow-y: auto;
+      max-height: 235px;
+    }
+    .preset-item {
+      background: #051505;
+      padding: 6px 8px;
+      border-radius: 4px;
+      border: 1px solid #004400;
+      cursor: pointer;
+    }
+    .preset-item:hover {
+      background: #0a2a0a;
+      border-color: #00ff00;
+    }
+
+    /* MODE 5 */
+    .m5-full-trans {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+
+    .red-label { font-size: 10px; color: #FF5555; font-weight: bold; margin-bottom: 2px; letter-spacing: 1px; }
+    .red-text { font-size: 15px; color: #FF4444; font-weight: bold; line-height: 1.3; word-wrap: break-word; }
+    .red-ja-text { font-size: 11px; color: #FF8888; margin-top: 3px; word-wrap: break-word; }
+    
+    .green-label { font-size: 10px; color: #00AA00; font-weight: bold; margin-bottom: 2px; letter-spacing: 1px; }
+    .en-text-large { font-size: 18px; font-weight: bold; color: #00FF00; line-height: 1.3; margin-bottom: 4px; word-wrap: break-word; width: 100%; }
+    .kana-text-mid { font-size: 12px; color: #00DD00; line-height: 1.25; margin-bottom: 6px; word-wrap: break-word; width: 100%; }
+    .ja-text-small { font-size: 11px; color: #009900; border-top: 1px dashed #005500; padding-top: 4px; width: 100%; word-wrap: break-word; }
+
+    .control-panel {
+      width: 380px;
+      padding-left: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      color: #ccc;
+      font-size: 14px;
+      overflow-y: auto;
+    }
+    .control-panel h2 { color: #00FF00; font-size: 18px; margin: 0 0 5px 0; }
+    .input-group { display: flex; flex-direction: column; gap: 5px; }
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #1a261a;
+      border: 1px solid #00aa00;
+      padding: 8px 10px;
+      border-radius: 4px;
+    }
+    .checkbox-group input[type="checkbox"] { width: 16px; height: 16px; accent-color: #00ff00; }
+    .checkbox-group label { color: #00ff00; font-size: 12px; font-weight: bold; cursor: pointer; }
+    
+    input, textarea, select, button {
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 10px; }
+    button:hover { background: #00dd00; color: #000; }
+    .status { font-size: 12px; color: #888; }
+    .file-info { font-size: 11px; color: #00FF00; word-break: break-all; }
+    .preview-img { max-width: 100%; max-height: 100px; margin-top: 5px; border: 1px solid #444; display: none; }
+    .mic-btn { background: #222; border: 1px solid #00ff00; color: #00ff00; padding: 6px; font-size: 12px; cursor: pointer; border-radius: 4px; }
+    .mic-btn.active { background: #00ff00; color: #000; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+</head>
+<body>
+
+  <div class="glass-container">
+    <div class="mode-tab-bar">
+      <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 短文・旅行</div>
+      <div id="tab2" class="mode-tab" onclick="switchMode(2)">2: 相手音声(全面)</div>
+      <div id="tab3" class="mode-tab" onclick="switchMode(3)">3: AI回答(全面)</div>
+      <div id="tab4" class="mode-tab" onclick="switchMode(4)">4: フレーズ集</div>
+      <div id="tab5" class="mode-tab" onclick="switchMode(5)">5: 自声翻訳</div>
+    </div>
+
+    <div id="glass-display">
+      <!-- 画面1 -->
+      <div id="mode1Screen" class="hud-mode-screen active">
+        <div id="page-badge-1" class="page-badge">1/1</div>
+        <div id="m1-partner-container" class="m1-partner-part">
+          <div class="red-label">相手の発言</div>
+          <div id="m1-partner-text" class="red-text">Where is the nearest station?</div>
+          <div id="m1-partner-ja" class="red-ja-text">最寄りの駅はどこですか？</div>
+        </div>
+        <div class="m1-my-part">
+          <div id="m1-en" class="en-text-large" style="font-size:15px;">It's a 5-minute walk from here.</div>
+          <div id="m1-kana" class="kana-text-mid" style="font-size:11px;">イッツ ア ファイブミニッツ ウォーク フロム ヒア。</div>
+          <div id="m1-ja" class="ja-text-small">ここから徒歩5分です。</div>
+        </div>
+      </div>
+
+      <!-- 画面2: 文字数による自動ページ分割機能追加 -->
+      <div id="mode2Screen" class="hud-mode-screen">
+        <div id="page-badge-2" class="page-badge red">1/1</div>
+        <div class="m2-full-partner">
+          <div class="red-label">相手の発言 (リアルタイム全面表示)</div>
+          <div id="m2-partner-text" class="red-text" style="font-size:16px;">
+            Regarding the proposed international tax strategy for Q3, could you explain how this aligns with OECD guidelines and our current transfer pricing documentation?
+          </div>
+          <div id="m2-partner-ja" class="red-ja-text" style="font-size:13px; margin-top:8px; border-top:1px dashed #552222; padding-top:6px;">
+            第3四半期に提案されている国際税務戦略について、これがOECDガイドラインおよび当社の現在の移転価格文書とどのように整合しているか説明していただけますか？
+          </div>
+        </div>
+      </div>
+
+      <!-- 画面3 -->
+      <div id="mode3Screen" class="hud-mode-screen">
+        <div id="page-badge-3" class="page-badge">1/1</div>
+        <div class="m3-full-ai">
+          <div class="green-label">AI回答ヒント (全面表示)</div>
+          <div id="m3-en" class="en-text-large">Our strategy aligns fully with the latest OECD transfer pricing guidelines.</div>
+          <div id="m3-kana" class="kana-text-mid">アウア ストラテジー アラインズ フーリィ ウィズ ザ レイテスト オーイーシーディー トランスファー プライシング ガイドラインズ。</div>
+          <div id="m3-ja" class="ja-text-small">当社の戦略は最新のOECD移転価格ガイドラインに完全準拠しています。</div>
+        </div>
+      </div>
+
+      <!-- 画面4 -->
+      <div id="mode4Screen" class="hud-mode-screen">
+        <div class="page-badge">定型文</div>
+        <div class="green-label">よく使う質問フレーズ集 (選択で1画面目へセット)</div>
+        <ul class="preset-list">
+          <li class="preset-item" onclick="selectPhrase('Could you explain the details?', 'クッド ユー エクスプレイン ザ ディテールズ？', '詳細を教えていただけますか？')">
+            <div style="font-size:12px; font-weight:bold; color:#00FF00;">1. Could you explain the details?</div>
+            <div style="font-size:10px; color:#00DD00;">クッド ユー エクスプレイン ザ ディテールズ？</div>
+            <div style="font-size:10px; color:#008800;">詳細を教えていただけますか？</div>
+          </li>
+          <li class="preset-item" onclick="selectPhrase('What is the main risk regarding schedule?', 'ホワット イズ ザ メイン リスク リガーディング スケジュール？', 'スケジュールに関する主なリスクは何ですか？')">
+            <div style="font-size:12px; font-weight:bold; color:#00FF00;">2. What is the main risk regarding schedule?</div>
+            <div style="font-size:10px; color:#00DD00;">ホワット イズ ザ メイン リスク リガーディング...</div>
+            <div style="font-size:10px; color:#008800;">スケジュールに関する主なリスクは何ですか？</div>
+          </li>
+          <li class="preset-item" onclick="selectPhrase('Could you send me the relevant documentation?', 'クッド ユー センド ミー ザ レレバント ドキュメンテーション？', '関連資料を送っていただけますか？')">
+            <div style="font-size:12px; font-weight:bold; color:#00FF00;">3. Could you send me the relevant documentation?</div>
+            <div style="font-size:10px; color:#00DD00;">クッド ユー センド ミー ザ レレバント ドキュ...</div>
+            <div style="font-size:10px; color:#008800;">関連資料を送っていただけますか？</div>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 画面5 -->
+      <div id="mode5Screen" class="hud-mode-screen">
+        <div class="page-badge">英訳</div>
+        <div class="m5-full-trans">
+          <div class="green-label">🎤 自声リアルタイム英訳</div>
+          <div id="m5-en" class="en-text-large">I will clarify our financial report right away.</div>
+          <div id="m5-kana" class="kana-text-mid">アイ ウィル クラリファイ アウア ファイナンシャル...</div>
+          <div id="m5-ja" class="ja-text-small">すぐに財務報告の内容を明確にします。</div>
+        </div>
+      </div>
+    </div>
+
+    <p style="color:#666; font-size:12px; margin-top:15px;">
+      [操作] 「←」「→」で5画面切替 / 「↑」「↓」でページめくり (R1リング対応)
+    </p>
+  </div>
+
+  <div class="control-panel">
+    <h2>会話・質問アシスタント (AI)</h2>
+    
+    <div class="checkbox-group">
+      <input type="checkbox" id="autoGenerate" checked onchange="toggleAutoGenerateMode()" />
+      <label for="autoGenerate">⚡ リアルタイム自動生成モード (ON)</label>
+    </div>
+
+    <div class="input-group">
+      <label>回答のスタンス（モード）:</label>
+      <select id="responseMode" onchange="triggerAutoGenerate()">
+        <optgroup label="ビジネス">
+          <option value="finance">【経理・財務視点】数値・リスク・根拠重視（基本）</option>
+          <option value="proactive">【推進・強気】ビジネスチャンス・成果をアピール</option>
+          <option value="cautious">【慎重・ガード】確認・持ち帰って後日回答</option>
+          <option value="clarify">【深掘り・聞き返し】相手の発言・数値を深掘り</option>
+        </optgroup>
+        <optgroup label="プライベート">
+          <option value="casual">【日常会話】フレンドリー・自然な雑談表現</option>
+          <option value="travel">【海外旅行】空港・ホテル・トラブル時の明確な表現</option>
+        </optgroup>
+      </select>
+    </div>
+
+    <div class="input-group">
+      <label>資料・グラフ画像・スライド添付 (PDF/PNG/JPG/TXT):</label>
+      <input type="file" id="fileInput" accept=".pdf, .png, .jpg, .jpeg, .webp, .txt, .csv" onchange="handleFileUpload()" />
+      <div id="fileStatus" class="file-info"></div>
+      <img id="imagePreview" class="preview-img" alt="Preview" />
+    </div>
+
+    <div class="input-group">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <label>相手の発言 / 状況:</label>
+        <button id="micBtn" class="mic-btn" onclick="toggleSpeechRecognition()">🎤 リアルタイム音声聴取: OFF</button>
+      </div>
+      <textarea id="userInput" rows="3" placeholder="例: 今期の利益率低下の理由についてどう説明しますか？" oninput="onUserInputManual()"></textarea>
+    </div>
+
+    <div class="input-group">
+      <label>WebページURL (GitHub Pages等):</label>
+      <input type="url" id="siteUrl" placeholder="https://username.github.io/repository/" onchange="saveSiteUrl()" />
+    </div>
+
+    <div class="input-group">
+      <label>OpenAI API Key:</label>
+      <input type="password" id="apiKey" placeholder="sk-..." oninput="debounceAutoGenerate()" />
+    </div>
+
+    <div class="input-group">
+      <label>Even Realities G2 API Key / Token:</label>
+      <input type="password" id="g2ApiKey" placeholder="G2_API_KEY..." oninput="saveG2ApiKey()" />
+    </div>
+
+    <button id="generateBtn" onclick="generateBusinessAnswer()">画面2のテキストをAIへ送信して画面3に回答生成</button>
+    <div id="status" class="status">自動生成モード有効（入力・音声・ファイル変更時に自動実行）</div>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+    let currentMode = 1;
+    let m3Pages = [];
+    let m3Index = 0;
+
+    /* 画面2用 相手の発言ページ管理 */
+    let m2Pages = [];
+    let m2Index = 0;
+    let fullPartnerEn = "";
+    let fullPartnerJa = "";
+
+    let uploadedFileText = "";
+    let uploadedImageDataUrl = "";
+    let debounceTimer = null;
+    let recognition = null;
+    let isListening = false;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedUrl = localStorage.getItem('prompter_site_url');
+      if (savedUrl) document.getElementById('siteUrl').value = savedUrl;
+
+      const savedKey = localStorage.getItem('prompter_api_key');
+      if (savedKey) document.getElementById('apiKey').value = savedKey;
+
+      const savedG2Key = localStorage.getItem('prompter_g2_api_key');
+      if (savedG2Key) document.getElementById('g2ApiKey').value = savedG2Key;
+
+      initSpeechRecognition();
+    });
+
+    function saveSiteUrl() {
+      const url = document.getElementById('siteUrl').value.trim();
+      localStorage.setItem('prompter_site_url', url);
+    }
+
+    function saveG2ApiKey() {
+      const key = document.getElementById('g2ApiKey').value.trim();
+      if (key) localStorage.setItem('prompter_g2_api_key', key);
+    }
+
+    async function sendToG2Display(textToSend) {
+      const g2ApiKey = document.getElementById('g2ApiKey').value.trim();
+      if (!g2ApiKey) return;
+
+      try {
+        await fetch('https://api.evenrealities.com/v1/display/text', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${g2ApiKey}`
+          },
+          body: JSON.stringify({
+            text: textToSend,
+            duration: 10,
+            clear_previous: true
+          })
+        });
+      } catch (e) {
+        console.error('G2通信エラー:', e);
+      }
+    }
+
+    function switchMode(modeNum) {
+      currentMode = modeNum;
+      for (let i = 1; i <= 5; i++) {
+        const tab = document.getElementById(`tab${i}`);
+        const screen = document.getElementById(`mode${i}Screen`);
+        if (tab) tab.classList.toggle('active', i === modeNum);
+        if (screen) screen.classList.toggle('active', i === modeNum);
+      }
+      syncCurrentDisplayToG2();
+    }
+
+    function syncCurrentDisplayToG2() {
+      if (currentMode === 1) {
+        const partner = document.getElementById('m1-partner-text').innerText;
+        const partnerJa = document.getElementById('m1-partner-ja').innerText;
+        const en = document.getElementById('m1-en').innerText;
+        sendToG2Display(`[PARTNER]\n${partner}\n(${partnerJa})\n[MY ANSWER]\n${en}`);
+      } else if (currentMode === 2 && m2Pages.length > 0) {
+        const p = m2Pages[m2Index];
+        sendToG2Display(`[PARTNER ${m2Index+1}/${m2Pages.length}]\n${p.en}\n\n${p.ja}`);
+      } else if (currentMode === 3 && m3Pages.length > 0) {
+        const card = m3Pages[m3Index];
+        sendToG2Display(`${card.en}\n${card.kana}`);
+      } else if (currentMode === 4) {
+        sendToG2Display("フレーズ集モード\nフレーズを選択してください");
+      } else if (currentMode === 5) {
+        const en = document.getElementById('m5-en').innerText;
+        const kana = document.getElementById('m5-kana').innerText;
+        sendToG2Display(`${en}\n${kana}`);
+      }
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+
+      if (event.key === 'ArrowRight') {
+        let nextMode = currentMode + 1;
+        if (nextMode > 5) nextMode = 1;
+        switchMode(nextMode);
+      } else if (event.key === 'ArrowLeft') {
+        let prevMode = currentMode - 1;
+        if (prevMode < 1) prevMode = 5;
+        switchMode(prevMode);
+      } else if (currentMode === 2 && m2Pages.length > 1) {
+        if (event.key === 'ArrowDown' && m2Index < m2Pages.length - 1) {
+          m2Index++;
+          renderM2();
+        } else if (event.key === 'ArrowUp' && m2Index > 0) {
+          m2Index--;
+          renderM2();
+        }
+      } else if (currentMode === 3 && m3Pages.length > 1) {
+        if (event.key === 'ArrowDown' && m3Index < m3Pages.length - 1) {
+          m3Index++;
+          renderM3();
+        } else if (event.key === 'ArrowUp' && m3Index > 0) {
+          m3Index--;
+          renderM3();
+        }
+      }
+    });
+
+    function toggleAutoGenerateMode() {
+      const isAuto = document.getElementById('autoGenerate').checked;
+      const status = document.getElementById('status');
+      const btn = document.getElementById('generateBtn');
+
+      if (isAuto) {
+        status.innerText = "自動生成モード有効（入力・音声・ファイル変更時に自動実行）";
+        btn.style.opacity = "0.6";
+        triggerAutoGenerate();
+      } else {
+        status.innerText = "手動生成モード";
+        btn.style.opacity = "1";
+      }
+    }
+
+    function onUserInputManual() {
+      const val = document.getElementById('userInput').value;
+      updatePartnerText(val, "");
+      debounceAutoGenerate();
+    }
+
+    /* --- 相手の発言更新・文字数オーバー時の自動ページ分割ロジック --- */
+    function updatePartnerText(enText, jaText) {
+      fullPartnerEn = enText;
+      if (jaText) fullPartnerJa = jaText;
+
+      // 1画面目の更新 ＆ スクロール追従（最新行を表示）
+      document.getElementById('m1-partner-text').innerText = enText;
+      document.getElementById('m1-partner-ja').innerText = fullPartnerJa;
+      const m1Container = document.getElementById('m1-partner-container');
+      m1Container.scrollTop = m1Container.scrollHeight;
+
+      // 画面2の文字数による自動分割処理 (1ページ枠あたり英語約120文字/和訳約80文字)
+      const MAX_PAGE_LEN = 120;
+      m2Pages = [];
+
+      if (enText.length <= MAX_PAGE_LEN) {
+        m2Pages.push({ en: enText, ja: fullPartnerJa });
+      } else {
+        // 単語単位で分割
+        const words = enText.split(' ');
+        let currentChunk = "";
+        for (let w of words) {
+          if ((currentChunk + " " + w).length > MAX_PAGE_LEN) {
+            m2Pages.push({ en: currentChunk.trim(), ja: "(長文のため自動分割表示)" });
+            currentChunk = w;
+          } else {
+            currentChunk += " " + w;
+          }
+        }
+        if (currentChunk) {
+          m2Pages.push({ en: currentChunk.trim(), ja: fullPartnerJa });
+        }
+      }
+
+      // 文字数が溢れて最新ページが追加されたら、自動で最後のページ（最新発言）へ切り替え
+      m2Index = m2Pages.length - 1;
+      renderM2();
+    }
+
+    function renderM2() {
+      if (m2Pages.length === 0) return;
+      const page = m2Pages[m2Index];
+      document.getElementById('page-badge-2').innerText = `${m2Index + 1}/${m2Pages.length}`;
+      document.getElementById('m2-partner-text').innerText = page.en;
+      document.getElementById('m2-partner-ja').innerText = page.ja;
+      
+      if (currentMode === 2) {
+        sendToG2Display(`[PARTNER ${m2Index+1}/${m2Pages.length}]\n${page.en}\n\n${page.ja}`);
+      }
+    }
+
+    function debounceAutoGenerate() {
+      const key = document.getElementById('apiKey').value.trim();
+      if (key) localStorage.setItem('prompter_api_key', key);
+
+      const isAuto = document.getElementById('autoGenerate').checked;
+      if (!isAuto) return;
+
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        triggerAutoGenerate();
+      }, 1000);
+    }
+
+    function triggerAutoGenerate() {
+      const isAuto = document.getElementById('autoGenerate').checked;
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const promptText = document.getElementById('userInput').value.trim();
+
+      if (isAuto && apiKey && (promptText || uploadedImageDataUrl || uploadedFileText)) {
+        generateBusinessAnswer();
+      }
+    }
+
+    function initSpeechRecognition() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) return;
+
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = async (event) => {
+        let interimText = '';
+        let finalText = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            finalText += event.results[i][0].transcript;
+          } else {
+            interimText += event.results[i][0].transcript;
+          }
+        }
+
+        const text = finalText || interimText;
+        if (text) {
+          if (currentMode === 5 && finalText) {
+            translateSelfSpeech(finalText);
+          } else {
+            document.getElementById('userInput').value = text;
+            updatePartnerText(text, fullPartnerJa);
+            
+            if (finalText) {
+              translatePartnerSpeech(finalText);
+              debounceAutoGenerate();
+            }
+          }
+        }
+      };
+
+      recognition.onend = () => { if (isListening) recognition.start(); };
+    }
+
+    function toggleSpeechRecognition() {
+      if (!recognition) return;
+      const btn = document.getElementById('micBtn');
+      if (isListening) {
+        isListening = false;
+        recognition.stop();
+        btn.classList.remove('active');
+        btn.innerText = "🎤 リアルタイム音声聴取: OFF";
+      } else {
+        isListening = true;
+        recognition.lang = currentMode === 5 ? 'ja-JP' : 'en-US';
+        recognition.start();
+        btn.classList.add('active');
+        btn.innerText = "🎤 リアルタイム音声聴取: ON";
+      }
+    }
+
+    async function translatePartnerSpeech(englishText) {
+      const apiKey = document.getElementById('apiKey').value.trim();
+      if (!apiKey) return;
+
+      try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: "英文を自然な日本語に和訳してください。和訳テキストのみを出力。" },
+              { role: "user", content: englishText }
+            ]
+          })
+        });
+        const data = await response.json();
+        const jaText = data.choices[0].message.content.trim();
+        updatePartnerText(englishText, jaText);
+      } catch(e) {}
+    }
+
+    async function translateSelfSpeech(japaneseText) {
+      const apiKey = document.getElementById('apiKey').value.trim();
+      document.getElementById('m5-ja').innerText = japaneseText;
+      if (!apiKey) return;
+
+      try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: "日本語を自然なビジネス英語(en)に翻訳しカタカナ(kana)を付与。JSON形式: {\"en\":\"...\",\"kana\":\"...\"}" },
+              { role: "user", content: japaneseText }
+            ]
+          })
+        });
+        const data = await response.json();
+        const parsed = JSON.parse(data.choices[0].message.content.trim().replace(/```json/g, '').replace(/```/g, ''));
+        document.getElementById('m5-en').innerText = parsed.en;
+        document.getElementById('m5-kana').innerText = parsed.kana;
+        sendToG2Display(`${parsed.en}\n${parsed.kana}`);
+      } catch(e) {}
+    }
+
+    async function handleFileUpload() {
+      const fileInput = document.getElementById('fileInput');
+      const fileStatus = document.getElementById('fileStatus');
+      const previewImg = document.getElementById('imagePreview');
+      const file = fileInput.files[0];
+
+      uploadedFileText = "";
+      uploadedImageDataUrl = "";
+      previewImg.style.display = "none";
+
+      if (!file) {
+        fileStatus.innerText = "";
+        return;
+      }
+
+      fileStatus.innerText = "解析中...";
+
+      if (file.type.startsWith("image/")) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          uploadedImageDataUrl = e.target.result;
+          previewImg.src = uploadedImageDataUrl;
+          previewImg.style.display = "block";
+          fileStatus.innerText = `画像読み込み完了: ${file.name}`;
+          triggerAutoGenerate();
+        };
+        reader.readAsDataURL(file);
+      } else if (file.type === "application/pdf") {
+        const reader = new FileReader();
+        reader.onload = async function() {
+          const pdf = await pdfjsLib.getDocument(new Uint8Array(this.result)).promise;
+          let text = "";
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map(item => item.str).join(" ") + "\n";
+          }
+          uploadedFileText = text.substring(0, 3000);
+          fileStatus.innerText = `PDF読み込み完了: ${file.name}`;
+          triggerAutoGenerate();
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          uploadedFileText = e.target.result.substring(0, 3000);
+          fileStatus.innerText = `テキスト完了: ${file.name}`;
+          triggerAutoGenerate();
+        };
+        reader.readAsText(file);
+      }
+    }
+
+    function selectPhrase(en, kana, ja) {
+      document.getElementById('m1-en').innerText = en;
+      document.getElementById('m1-kana').innerText = kana;
+      document.getElementById('m1-ja').innerText = ja;
+      switchMode(1);
+    }
+
+    async function generateBusinessAnswer() {
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const promptText = document.getElementById('userInput').value;
+      const mode = document.getElementById('responseMode').value;
+      const status = document.getElementById('status');
+
+      if (!apiKey || (!promptText && !uploadedImageDataUrl && !uploadedFileText)) return;
+
+      status.innerText = "画面3用のAI回答を生成中...";
+
+      let modeInstruction = "";
+      if (mode === 'finance') modeInstruction = "経理・財務の視点で、数値・リスク・根拠重視。";
+      else if (mode === 'proactive') modeInstruction = "ビジネスチャンスを強調し、前向きに推進。";
+      else if (mode === 'cautious') modeInstruction = "検討が必要である旨を丁寧かつスマートに伝える。";
+      else if (mode === 'clarify') modeInstruction = "相手の発言の意図や詳細な数値について聞き返す。";
+
+      const systemPrompt = `スマートグラス用AIアシスタント。
+【回答指示】${modeInstruction}
+【ルール】
+1. 1ページあたりの英文は15単語以内。超える場合は複数ページ(pages配列)に分割。
+2. フリガナ(kana)を省略せず最後まで作成し句読点を挿入。
+3. 和訳(ja)を付ける。
+
+JSON形式:
+{
+  "pages": [
+    { "page_num": "1/2", "en": "15単語以内英文", "kana": "フリガナ", "ja": "日本語訳" }
+  ]
+}`;
+
+      let userContent = [];
+      if (promptText) userContent.push({ type: "text", text: `相手の発言: ${promptText}` });
+      if (uploadedFileText) userContent.push({ type: "text", text: `参考資料: ${uploadedFileText}` });
+      if (uploadedImageDataUrl) userContent.push({ type: "image_url", image_url: { url: uploadedImageDataUrl } });
+
+      try {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: "gpt-4o-mini",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userContent }
+            ]
+          })
+        });
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.choices[0].message.content.trim().replace(/```json/g, '').replace(/```/g, ''));
+        
+        m3Pages = parsed.pages || [];
+        m3Index = 0;
+        renderM3();
+        
+        if (m3Pages.length > 0) {
+          document.getElementById('m1-en').innerText = m3Pages[0].en;
+          document.getElementById('m1-kana').innerText = m3Pages[0].kana;
+          document.getElementById('m1-ja').innerText = m3Pages[0].ja;
+        }
+
+        switchMode(3);
+        status.innerText = "画面3にAI回答を生成しました！(G2へ自動送信)";
+      } catch (err) {
+        status.innerText = "エラーが発生しました。APIキーまたはネットワークを確認してください。";
+      }
+    }
+
+    function renderM3() {
+      if (m3Pages.length === 0) return;
+      const card = m3Pages[m3Index];
+      document.getElementById('page-badge-3').innerText = `${m3Index + 1}/${m3Pages.length}`;
+      document.getElementById('m3-en').innerText = card.en;
+      document.getElementById('m3-kana').innerText = card.kana;
+      document.getElementById('m3-ja').innerText = card.ja;
+      sendToG2Display(`${card.en}\n${card.kana}`);
+    }
+  </script>
+</body>
+</html>
