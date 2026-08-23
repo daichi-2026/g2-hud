@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 5-Mode HUD Full Assistant</title>
+  <title>EVEN G2 Event Debugger</title>
   <style>
     body {
       background-color: #111;
@@ -142,7 +142,7 @@
 
   <!-- 右側：コントロールパネル -->
   <div class="control-panel">
-    <h2>G2 HUD コントローラー</h2>
+    <h2>G2 HUD デバッガー</h2>
     <div>
       <label>OpenAI API Key:</label>
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
@@ -157,8 +157,6 @@
       <label>マイク音声認識 (モード5用):</label>
       <button onclick="startVoiceRecognition()" style="background:#0055aa; width:100%;">🎤 音声認識スタート</button>
     </div>
-    <div style="border-top:1px solid #333; margin:5px 0;"></div>
-    <button onclick="exitApplication()" style="background:#aa0000;">🛑 アプリを終了してグラスメニューに戻る</button>
     <div id="status" class="status">SDK接続待機中...</div>
   </div>
 
@@ -208,25 +206,27 @@
           })
         );
 
-        document.getElementById('status').innerText = "G2 SDK 接続完了！";
+        document.getElementById('status').innerText = "G2 SDK 接続完了（イベントデバッグ中）";
 
-        // グラス側からのイベント処理（操作内容による分岐）
+        // 受信したイベントをそのままグラス画面に表示するデバッグリスナー
         bridge.onEvenHubEvent(event => {
-          console.log("Event received:", event);
-
-          // イベント内容に 'menu' や終了のシグナルが含まれている場合の判定
-          // SDKの仕様やイベント構造に合わせて、Menuボタン押下時の挙動をここでキャッチします
-          const eventStr = JSON.stringify(event).toLowerCase();
+          console.log("Raw Event Received:", event);
           
-          if (eventStr.includes('menu') || eventStr.includes('exit')) {
-            exitApplication();
-            return;
+          let eventString = "";
+          try {
+            eventString = typeof event === 'object' ? JSON.stringify(event, null, 2) : String(event);
+          } catch(e) {
+            eventString = String(event);
           }
 
-          // 通常のボタン（クリック等）の場合はモードをローテーション
-          currentMode = (currentMode % 5) + 1;
-          updateUIOnly(currentMode);
-          sendToG2Display(modeTexts[currentMode]);
+          // グラス画面に受信イベントを生で表示してテスト
+          sendToG2Display(`[EVENT DEBUG]\n${eventString}`);
+
+          // 通常のモード切替も一応継続（確認用）
+          if (!eventString.toLowerCase().includes('menu')) {
+            currentMode = (currentMode % 5) + 1;
+            updateUIOnly(currentMode);
+          }
         });
 
       } catch (e) {
@@ -248,29 +248,6 @@
         console.error("Display update failed:", e);
       }
     }
-
-    // アプリを終了してグラスのシステム側へ戻る関数
-    window.exitApplication = async function() {
-      if (!bridge) {
-        alert("ブリッジが接続されていません");
-        return;
-      }
-      try {
-        document.getElementById('status').innerText = "アプリを終了しています...";
-        // SDKが提供するアプリケーション終了／コンテナ破棄メソッドを呼び出し
-        if (typeof bridge.exitApp === 'function') {
-          await bridge.exitApp();
-        } else if (typeof bridge.closeApp === 'function') {
-          await bridge.closeApp();
-        } else {
-          // メソッドが見つからない場合のフォールバック（画面をクリアして通知）
-          await sendToG2Display("App Closed.\nReturning to system menu...");
-        }
-        document.getElementById('status').innerText = "アプリを終了しました。";
-      } catch (e) {
-        document.getElementById('status').innerText = "終了処理エラー: " + e.message;
-      }
-    };
 
     function updateUIOnly(mode) {
       document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
