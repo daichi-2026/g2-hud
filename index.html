@@ -120,9 +120,7 @@
       </div>
       <div id="mode3Screen" class="hud-mode-screen">
         <div style="color:#00FF00; font-size:10px; font-weight:bold;">AI回答アシスト (Mode 3/5)</div>
-        <div id="m3-en" style="color:#00FF00; font-size:14px; font-weight:bold; margin-top:4px;">-</div>
-        <div id="m3-kana" style="color:#00aa00; font-size:10px;">-</div>
-        <div id="m3-ja" style="color:#888; font-size:10px; margin-top:4px;">-</div>
+        <div id="m3-text" style="color:#00FF00; font-size:13px; font-weight:bold; margin-top:4px; white-space: pre-wrap;">-</div>
       </div>
       <div id="mode4Screen" class="hud-mode-screen">
         <div style="color:#00FF00; font-size:10px; font-weight:bold;">フレーズ集 (Mode 4/5)</div>
@@ -266,33 +264,23 @@
           },
           body: JSON.stringify({
             model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: prompt + " を英語に翻訳し、英訳・カタカナ読み・日本語をJSON形式（キー: en, kana, ja）で返してください。" }]
+            messages: [{ role: 'user', content: prompt + " を英語に翻訳し、英訳と日本語訳をわかりやすく教えてください。" }]
           })
         });
         const data = await response.json();
-        const rawContent = data.choices[0].message.content;
-        console.log("AI Raw Response:", rawContent);
-        
-        let resJson = { en: "", kana: "", ja: rawContent };
-        try {
-          const cleanJson = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
-          resJson = JSON.parse(cleanJson);
-        } catch(err) {
-          console.warn("JSON parse failed, falling back to raw text");
-        }
+        const aiReply = data.choices[0].message.content;
 
         // 画面（UI）側の更新
-        document.getElementById('m3-en').innerText = resJson.en || prompt;
-        document.getElementById('m3-kana').innerText = resJson.kana || '';
-        document.getElementById('m3-ja').innerText = resJson.ja || rawContent;
+        document.getElementById('m3-text').innerText = aiReply;
         
         // グラス（レンズ）側のテキストを作成して送信
-        modeTexts[3] = `AI回答 (3/5):\n${resJson.en || prompt}\n${resJson.kana || ''}\n-------------------\n${resJson.ja || rawContent}`;
+        modeTexts[3] = `AI回答 (3/5):\n${aiReply}`;
         switchMode(3);
 
         document.getElementById('status').innerText = "完了！";
       } catch (e) {
         document.getElementById('status').innerText = "エラー: " + e.message;
+        console.error(e);
       }
     };
 
