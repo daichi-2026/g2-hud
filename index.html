@@ -107,8 +107,9 @@
       <!-- モード1: 短文・旅行 -->
       <div id="mode1Screen" class="hud-mode-screen active">
         <div style="color:#FF5555; font-size:11px; font-weight:bold;">相手の発言</div>
-        <div id="m1-partner" style="color:#FF4444; font-size:15px; font-weight:bold; margin-bottom:4px;">Where is the nearest station?</div>
-        <div style="border-top:1px dashed #005500; margin:4px 0;"></div>
+        <div id="m1-partner" style="color:#FF4444; font-size:15px; font-weight:bold; margin-bottom:2px;">Where is the nearest station?</div>
+        <div id="m1-partner-ja" style="color:#ff8888; font-size:11px; margin-bottom:4px;">一番近い駅はどこですか？</div>
+        <div style="border-top:1px dashed #005500; margin:2px 0;"></div>
         <div id="m1-en" style="color:#00FF00; font-size:15px; font-weight:bold;">It's a 5-minute walk from here.</div>
         <div id="m1-kana" style="color:#00aa00; font-size:11px;">イツツア ファイブミニッツ ウォーク フロム ヒア。</div>
         <div id="m1-ja" style="color:#009900; font-size:11px;">ここから徒歩5分です。</div>
@@ -187,7 +188,9 @@
         bridge = await waitForEvenAppBridge();
         
         const initialText = 
-          "相手の発言:\nWhere is the nearest station?\n" +
+          "相手の発言:\n" +
+          "Where is the nearest station?\n" +
+          "(一番近い駅はどこですか？)\n" +
           "-------------------\n" +
           "It's a 5-minute walk from here.\n" +
           "イツツア ファイブミニッツ ウォーク...\n" +
@@ -250,7 +253,9 @@
 
       if (mode === 1) {
         const t = 
-          "相手の発言:\nWhere is the nearest station?\n" +
+          "相手の発言:\n" +
+          "Where is the nearest station?\n" +
+          "(一番近い駅はどこですか？)\n" +
           "-------------------\n" +
           "It's a 5-minute walk from here.\n" +
           "イツツア ファイブミニッツ ウォーク...\n" +
@@ -291,7 +296,6 @@
         const data = await response.json();
         const rawContent = data.choices[0].message.content;
         
-        // JSONパースを試みる
         let resJson = { en: prompt, kana: "よみかた", ja: rawContent };
         try {
           const cleanJson = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -300,14 +304,12 @@
           resJson.ja = rawContent;
         }
 
-        // ブラウザ側プレビュー更新
         document.getElementById('m3-en').innerText = resJson.en;
         document.getElementById('m3-kana').innerText = resJson.kana || '';
         document.getElementById('m3-ja').innerText = resJson.ja;
         
         switchMode(3);
 
-        // グラス側へ送信（英語・ルビ・和訳をすべて含める）
         const glassText = `[AI回答]\n${resJson.en}\n(${resJson.kana || ''})\n---\n${resJson.ja}`;
         sendToG2Display(glassText);
 
