@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Event Debugger</title>
+  <title>EVEN G2 Translator & App</title>
   <style>
     body {
       background-color: #111;
@@ -142,7 +142,7 @@
 
   <!-- 右側：コントロールパネル -->
   <div class="control-panel">
-    <h2>G2 HUD デバッガー</h2>
+    <h2>G2 HUD コントロール</h2>
     <div>
       <label>OpenAI API Key:</label>
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
@@ -206,27 +206,23 @@
           })
         );
 
-        document.getElementById('status').innerText = "G2 SDK 接続完了（イベントデバッグ中）";
+        document.getElementById('status').innerText = "G2 SDK 接続完了";
 
-        // 受信したイベントをそのままグラス画面に表示するデバッグリスナー
+        // イベントリスナー（Menuボタンと通常クリックの判定分岐）
         bridge.onEvenHubEvent(event => {
           console.log("Raw Event Received:", event);
-          
-          let eventString = "";
-          try {
-            eventString = typeof event === 'object' ? JSON.stringify(event, null, 2) : String(event);
-          } catch(e) {
-            eventString = String(event);
+
+          // Menuボタン等（コンテナイベント）が押されたときの判定
+          if (event && event.jsonData && event.jsonData.containerID) {
+            console.log("Menu button event detected.");
+            // 必要に応じてここにアプリ終了処理などを記述できます
+            return;
           }
 
-          // グラス画面に受信イベントを生で表示してテスト
-          sendToG2Display(`[EVENT DEBUG]\n${eventString}`);
-
-          // 通常のモード切替も一応継続（確認用）
-          if (!eventString.toLowerCase().includes('menu')) {
-            currentMode = (currentMode % 5) + 1;
-            updateUIOnly(currentMode);
-          }
+          // 通常のクリック等の場合はモードを順番に切り替え
+          currentMode = (currentMode % 5) + 1;
+          updateUIOnly(currentMode);
+          sendToG2Display(modeTexts[currentMode]);
         });
 
       } catch (e) {
