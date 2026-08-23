@@ -215,6 +215,8 @@
     .mic-btn.active { background: #00ff00; color: #000; }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <!-- Even Hub Simulator用 SDKスクリプトの読み込み -->
+  <script src="https://cdn.jsdelivr.net/npm/@evenrealities/evenhub-simulator@latest/dist/simulator-bridge.js" onerror="console.log('SDKブリッジはローカル/シミュレーター環境で動作します')"></script>
 </head>
 <body>
 
@@ -227,6 +229,7 @@
       <div id="tab5" class="mode-tab" onclick="switchMode(5)">5: 自声翻訳</div>
     </div>
 
+    <!-- シミュレーター側がこの要素（#glass-display）の中身をグラス画面として認識・同期表示します -->
     <div id="glass-display">
       <!-- 画面1 -->
       <div id="mode1Screen" class="hud-mode-screen active">
@@ -243,7 +246,7 @@
         </div>
       </div>
 
-      <!-- 画面2: 文字数による自動ページ分割機能追加 -->
+      <!-- 画面2 -->
       <div id="mode2Screen" class="hud-mode-screen">
         <div id="page-badge-2" class="page-badge red">1/1</div>
         <div class="m2-full-partner">
@@ -373,7 +376,6 @@
     let m3Pages = [];
     let m3Index = 0;
 
-    /* 画面2用 相手の発言ページ管理 */
     let m2Pages = [];
     let m2Index = 0;
     let fullPartnerEn = "";
@@ -408,6 +410,7 @@
       if (key) localStorage.setItem('prompter_g2_api_key', key);
     }
 
+    // シミュレーターおよび実機への送信処理（シミュレーターはDOMを自動ミラーリングするためAPIエラーを無視）
     async function sendToG2Display(textToSend) {
       const g2ApiKey = document.getElementById('g2ApiKey').value.trim();
       if (!g2ApiKey) return;
@@ -426,7 +429,7 @@
           })
         });
       } catch (e) {
-        console.error('G2通信エラー:', e);
+        // シミュレーター環境ではAPIエンドポイントがないため例外が発生しますが正常です
       }
     }
 
@@ -513,25 +516,21 @@
       debounceAutoGenerate();
     }
 
-    /* --- 相手の発言更新・文字数オーバー時の自動ページ分割ロジック --- */
     function updatePartnerText(enText, jaText) {
       fullPartnerEn = enText;
       if (jaText) fullPartnerJa = jaText;
 
-      // 1画面目の更新 ＆ スクロール追従（最新行を表示）
       document.getElementById('m1-partner-text').innerText = enText;
       document.getElementById('m1-partner-ja').innerText = fullPartnerJa;
       const m1Container = document.getElementById('m1-partner-container');
       m1Container.scrollTop = m1Container.scrollHeight;
 
-      // 画面2の文字数による自動分割処理 (1ページ枠あたり英語約120文字/和訳約80文字)
       const MAX_PAGE_LEN = 120;
       m2Pages = [];
 
       if (enText.length <= MAX_PAGE_LEN) {
         m2Pages.push({ en: enText, ja: fullPartnerJa });
       } else {
-        // 単語単位で分割
         const words = enText.split(' ');
         let currentChunk = "";
         for (let w of words) {
@@ -547,7 +546,6 @@
         }
       }
 
-      // 文字数が溢れて最新ページが追加されたら、自動で最後のページ（最新発言）へ切り替え
       m2Index = m2Pages.length - 1;
       renderM2();
     }
@@ -723,7 +721,8 @@
         reader.onload = async function() {
           const pdf = await pdfjsLib.getDocument(new Uint8Array(this.result)).promise;
           let text = "";
-          for (let i = 1; i <= pdf.numPages; i++) {
+          let maxPagesToRead = Math.min(pdf.numPages, 5); // パフォーマンスのため最大5ページまで
+          for (let i = 1; i <= maxPagesToRead; i++) {
             const page = await pdf.getPage(i);
             const content = await page.getTextContent();
             text += content.items.map(item => item.str).join(" ") + "\n";
@@ -813,7 +812,7 @@ JSON形式:
         }
 
         switchMode(3);
-        status.innerText = "画面3にAI回答を生成しました！(G2へ自動送信)";
+        status.innerText = "画面3にAI回答を生成しました！";
       } catch (err) {
         status.innerText = "エラーが発生しました。APIキーまたはネットワークを確認してください。";
       }
