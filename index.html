@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v1.4 (修正4回目)</span>
+      <span class="version-badge" id="versionBadge">v1.5 (爆速化版)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -194,7 +194,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v1.4 (修正4回目)";
+    const APP_VERSION = "v1.5 (爆速化版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -286,7 +286,6 @@
       }
     }
 
-    // ノイズ判定ロジックの適正化（過剰なキーワード判定を排除）
     function isNoiseOrFiller(text) {
       if (!text) return true;
       const clean = text.trim();
@@ -319,7 +318,7 @@
         return;
       }
 
-      if (totalBytes < 4000) {
+      if (totalBytes < 3200) {
         setStatus(`データ不足のためスキップ (${totalBytes} bytes)`);
         return;
       }
@@ -339,6 +338,7 @@
         formData.append('file', wavBlob, 'audio.wav');
         formData.append('model', 'whisper-1');
         formData.append('language', 'en');
+        formData.append('temperature', '0');
 
         const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
           method: 'POST',
@@ -365,18 +365,20 @@
             },
             body: JSON.stringify({
               model: 'gpt-4o-mini',
+              temperature: 0.3,
+              max_tokens: 120,
               messages: [
                 {
                   role: 'system',
-                  content: `あなたはスマートグラス用の通訳・回答アシスタントです。相手の発言を受け取り、中央に【破線】を明記した以下のフォーマットをそのまま厳格に守って出力してください。余計な挨拶や解説は一切不要です。
+                  content: `あなたはスマートグラス用リアルタイム通訳アシスタントです。即答性が最重要です。返答ヒントは会話テンポを保つため極めて短い一文（15単語以内）に絞り、フォーマットを厳格に守ってください。
 
 【相手】
 (英語原文)
 (日本語訳)
 -------------------
 【返答ヒント】
-(おすすめの英語返答)
-(カタカナフリガナ)
+(自然で短めの英語一文)
+(カタカナ)
 (日本語訳)`
                 },
                 { role: 'user', content: enText }
@@ -423,11 +425,12 @@
           setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
 
           if (silenceTimer) clearTimeout(silenceTimer);
+          // 爆速化のため無音判定時間を 1200ms -> 600ms に短縮
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
             }
-          }, 1200);
+          }, 600);
         }
       } else {
         if (currentMode === 1 && totalBytes > 0) {
