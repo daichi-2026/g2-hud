@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v1.5 (爆速化版)</span>
+      <span class="version-badge" id="versionBadge">v1.6 (フォーマット完全修正版)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -194,7 +194,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v1.5 (爆速化版)";
+    const APP_VERSION = "v1.6 (フォーマット完全修正版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -365,12 +365,12 @@
             },
             body: JSON.stringify({
               model: 'gpt-4o-mini',
-              temperature: 0.3,
-              max_tokens: 120,
+              temperature: 0.2,
+              max_tokens: 200,
               messages: [
                 {
                   role: 'system',
-                  content: `あなたはスマートグラス用リアルタイム通訳アシスタントです。即答性が最重要です。返答ヒントは会話テンポを保つため極めて短い一文（15単語以内）に絞り、フォーマットを厳格に守ってください。
+                  content: `あなたはスマートグラス用の通訳・回答アシスタントです。入力された英語音声を処理し、必ず以下のフォーマット通りに全ての項目を出力してください。【相手】の項目を省略することは厳禁です。
 
 【相手】
 (英語原文)
@@ -378,7 +378,7 @@
 -------------------
 【返答ヒント】
 (自然で短めの英語一文)
-(カタカナ)
+(カタカナフリガナ)
 (日本語訳)`
                 },
                 { role: 'user', content: enText }
@@ -425,7 +425,6 @@
           setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
 
           if (silenceTimer) clearTimeout(silenceTimer);
-          // 爆速化のため無音判定時間を 1200ms -> 600ms に短縮
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
