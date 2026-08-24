@@ -96,7 +96,7 @@
       cursor: pointer;
     }
     .nav-btn:hover { background: #00FF00; color: #000; }
-    .status { font-size: 11px; color: #888; }
+    .status { font-size: 11px; color: #888; white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
 <body tabindex="0">
@@ -143,6 +143,9 @@
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
     <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信（画面2用）</button>
     <button onclick="clearHistory()" style="background:#cc3333; margin-top:5px;">🗑️ 履歴をクリア</button>
+    
+    <div style="border-top:1px solid #333; margin:5px 0;"></div>
+    <div style="font-weight:bold; color:#00FF00;">【ログ・ステータス】</div>
     <div id="status" class="status">SDK接続待機中...</div>
   </div>
 
@@ -263,12 +266,16 @@
 
       const apiKey = document.getElementById('apiKey').value.trim();
       if (!apiKey) {
-        setStatus('API Keyを入力してください');
+        setStatus('エラー: API Keyを入力してください');
         return;
       }
 
-      // 最低限の音声サイズ（約0.25秒分）がないか、処理中ならスキップ
-      if (totalBytes < 8000 || isProcessing) return;
+      if (totalBytes < 4000) {
+        setStatus(`データ不足のためスキップ (${totalBytes} bytes)`);
+        return;
+      }
+
+      if (isProcessing) return;
 
       isProcessing = true;
       const chunksToProcess = [...pcmChunks];
@@ -277,7 +284,7 @@
       totalBytes = 0;
 
       try {
-        setStatus('Whisperで文字起こし中...');
+        setStatus(`Whisperへ送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
         
         const formData = new FormData();
@@ -297,9 +304,10 @@
 
         const data = await response.json();
         const enText = data.text ? data.text.trim() : '';
+        console.log('Whisper Result:', enText);
 
         if (!isNoiseOrFiller(enText)) {
-          setStatus('AIが和訳＆返答を生成中...');
+          setStatus(`GPT生成中: "${enText}"`);
 
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -328,6 +336,11 @@
             })
           });
 
+          if (!chatResponse.ok) {
+            const errJson = await chatResponse.json().catch(() => ({}));
+            throw new Error(errJson.error?.message || `GPT HTTP ${chatResponse.status}`);
+          }
+
           const chatData = await chatResponse.json();
           const aiReply = chatData.choices[0].message.content;
 
@@ -336,13 +349,13 @@
           historyIndex = historyList.length - 1;
 
           await updateDisplays();
-          setStatus('完了！');
+          setStatus('処理完了 / 音声待機中...');
         } else {
-          setStatus('音声待機中...');
+          setStatus(`ノイズ判定でフィルタリング: "${enText}"`);
         }
       } catch (e) {
         console.error(e);
-        setStatus('エラー: ' + e.message);
+        setStatus('エラー発生: ' + e.message);
       } finally {
         isProcessing = false;
       }
@@ -420,7 +433,7 @@
         );
 
         await bridge.audioControl(true);
-        setStatus("G2 SDK 接続完了 / マイクON");
+        setStatus("G2 SDK 接続完了 / マイクON\n音声受信待機中...");
 
         bridge.onEvenHubEvent(async event => {
           const rawPcm = event.audioEvent?.audioPcm;
@@ -432,7 +445,14 @@
 
               if (currentMode === 1) {
                 setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB)`);
+                
+                // 無音タイマーの更新
                 resetSilenceTimer();
+
+                // データ容量オーバーフロー制御：300KB（約5~6秒）を超えたら無音を待たずに強制送信
+                if (totalBytes > 300 * 1024 && !isProcessing) {
+                  flushAndTranscribe();
+                }
               }
             }
           }
