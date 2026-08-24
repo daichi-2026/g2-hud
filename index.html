@@ -101,23 +101,23 @@
 
     <div id="glass-display">
       <div id="mode1Screen" class="hud-mode-screen active">
-        <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー翻訳 (Mode 1)</div>
-        <div id="m1-status" style="color:#888; font-size:11px; margin-top:4px;">音声入力待機中... (自動送信)</div>
-        <div id="m1-text" style="color:#fff; font-size:14px; font-weight:bold; margin-top:8px; white-space:pre-wrap;">-</div>
+        <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー翻訳 ＆ 返答アシスト (Mode 1)</div>
+        <div id="m1-status" style="color:#888; font-size:11px; margin-top:2px;">音声入力待機中...</div>
+        <div id="m1-text" style="color:#fff; font-size:12px; font-weight:bold; margin-top:4px; white-space:pre-wrap;">-</div>
       </div>
       <div id="mode2Screen" class="hud-mode-screen">
-        <div style="color:#00BFFF; font-size:10px; font-weight:bold;">プッシュ・トゥ・トーク (Mode 2)</div>
-        <div id="m2-status" style="color:#888; font-size:11px; margin-top:4px;">タップで音声送信＆翻訳</div>
-        <div id="m2-text" style="color:#fff; font-size:14px; font-weight:bold; margin-top:8px; white-space:pre-wrap;">-</div>
+        <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 ＆ 返答アシスト (Mode 2)</div>
+        <div id="m2-status" style="color:#888; font-size:11px; margin-top:2px;">タップで音声送信＆解析</div>
+        <div id="m2-text" style="color:#fff; font-size:12px; font-weight:bold; margin-top:4px; white-space:pre-wrap;">-</div>
       </div>
     </div>
   </div>
 
   <!-- 右側：コントロールパネル -->
   <div class="control-panel">
-    <h2>G2 音声翻訳コントロール</h2>
+    <h2>G2 音声翻訳＆返答アシスト</h2>
     <div>
-      <label>OpenAI API Key (Whisper用):</label>
+      <label>OpenAI API Key (Whisper/GPT用):</label>
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
     </div>
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -138,19 +138,17 @@
     let bridge = null;
     let currentMode = 1; // 1: 自動, 2: PTT
 
-    // 音声バッファ管理
     let pcmBuffer = [];
     let totalLength = 0;
     let isProcessing = false;
-    let accumulatedTextMode1 = '';
-    let accumulatedTextMode2 = '';
+    let accumulatedTextMode1 = '音声入力待機中...';
+    let accumulatedTextMode2 = 'タップ操作で送信';
 
     const modeTexts = {
-      1: "自動トリガー翻訳 (1/2):\n音声入力待機中...",
+      1: "自動トリガー (1/2):\n音声入力待機中...",
       2: "PTT 翻訳 (2/2):\nタップ操作で送信"
     };
 
-    // PCM (16kHz 16bit Mono) を WAV(Blob) へ変換
     function pcmToWavBlob(pcmChunks, totalLen) {
       const wavHeader = new ArrayBuffer(44);
       const view = new DataView(wavHeader);
@@ -160,8 +158,8 @@
       view.setUint32(12, 0x666d7420, false); // "fmt "
       view.setUint32(16, 16, true);
       view.setUint16(20, 1, true);
-      view.setUint16(22, 1, true); // Mono
-      view.setUint32(24, 16000, true); // 16kHz
+      view.setUint16(22, 1, true);
+      view.setUint32(24, 16000, true);
       view.setUint32(28, 32000, true);
       view.setUint16(32, 2, true);
       view.setUint16(34, 16, true);
@@ -178,7 +176,6 @@
       return new Blob([wavBytes], { type: 'audio/wav' });
     }
 
-    // Whisper API 呼び出し
     async function flushAndTranscribe() {
       const apiKey = document.getElementById('apiKey').value.trim();
       if (isProcessing || pcmBuffer.length === 0 || !apiKey) {
@@ -193,7 +190,7 @@
       totalLength = 0;
 
       try {
-        setStatus('Whisper APIへ送信中...');
+        setStatus('Whisperで文字起こし中...');
         const wavBlob = pcmToWavBlob(chunksToProcess, lenToProcess);
         const formData = new FormData();
         formData.append('file', wavBlob, 'audio.wav');
@@ -205,22 +202,50 @@
           body: formData
         });
 
-        if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+        if (!response.ok) throw new Error(`Whisper API Error: ${response.statusText}`);
         const data = await response.json();
+        const enText = data.text ? data.text.trim() : '';
 
-        if (data.text) {
+        if (enText && enText.length > 2) {
+          setStatus('AIが和訳＆返答を生成中...');
+
+          // GPT-4o-miniで「和訳」と「おすすめの返答（英語＋カタカナ＋日本語）」を生成
+          const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              messages: [
+                {
+                  role: 'system',
+                  content: 'あなたはスマートグラス用のスマート通訳アシスタントです。相手の英語を受け取り、以下の形式でグラスに収まる簡潔なテキストを作成してください。\n\n[相手の発言]\n・英語原文\n・自然な和訳\n\n[おすすめ返答]\n・英語の返答例\n・カタカナフリガナ\n・返答の日本語訳\n\n余計な挨拶や解説は省き、この構成のみを出力してください。'
+                },
+                {
+                  role: 'user',
+                  content: enText
+                }
+              ]
+            })
+          });
+
+          const chatData = await chatResponse.json();
+          const aiReply = chatData.choices[0].message.content;
+
           if (currentMode === 1) {
-            accumulatedTextMode1 += (accumulatedTextMode1 ? ' ' : '') + data.text;
+            accumulatedTextMode1 = aiReply;
             document.getElementById('m1-text').innerText = accumulatedTextMode1;
-            modeTexts[1] = `自動トリガー翻訳 (1/2):\n${accumulatedTextMode1}`;
+            modeTexts[1] = `自動トリガー:\n${accumulatedTextMode1}`;
           } else {
-            accumulatedTextMode2 += (accumulatedTextMode2 ? ' ' : '') + data.text;
+            accumulatedTextMode2 = aiReply;
             document.getElementById('m2-text').innerText = accumulatedTextMode2;
-            modeTexts[2] = `PTT 翻訳 (2/2):\n${accumulatedTextMode2}`;
+            modeTexts[2] = `PTT:\n${accumulatedTextMode2}`;
           }
           await sendToG2Display(modeTexts[currentMode]);
         }
-        setStatus('翻訳完了');
+        setStatus('完了！');
       } catch (e) {
         setStatus('エラー: ' + e.message);
       } finally {
@@ -254,31 +279,25 @@
           })
         );
 
-        // G2マイクの音声ストリームを開始
         await bridge.audioControl(true);
         setStatus("G2 SDK 接続完了 / マイクON");
 
-        // イベントリスナー（マイク音声データ＆タップイベント取得）
         bridge.onEvenHubEvent(async event => {
-          // 1. G2マイクからPCMを受信
           const pcm = event.audioEvent?.audioPcm;
           if (pcm) {
             pcmBuffer.push(pcm);
             totalLength += pcm.length;
 
-            // 画面1（自動モード）: 約4秒分(128,000 bytes)溜まったら裏で自動送信
+            // 自動モード: 約4秒分溜まったら送信
             if (currentMode === 1 && totalLength > 32000 * 4) {
               flushAndTranscribe();
             }
           }
 
-          // 2. タップイベントの判定
           const sysType = event.sysEvent?.eventType;
           const textType = event.textEvent?.eventType;
-
           if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
             if (currentMode === 2) {
-              // 画面2（PTTモード）の時：タップで今溜まっている音声データを即座に送信
               flushAndTranscribe();
             }
           }
@@ -320,7 +339,6 @@
 
     window.switchMode = function(mode) {
       currentMode = mode;
-      // モード切り替え時にバッファをリセット
       pcmBuffer = [];
       totalLength = 0;
       updateUIOnly(currentMode);
