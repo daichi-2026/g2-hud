@@ -111,7 +111,7 @@
     <div id="glass-display">
       <div id="mode1Screen" class="hud-mode-screen active">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー (↑/↓キーで移動)</div>
+          <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー (↑/↓キーで履歴切り替え)</div>
           <div>
             <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
             <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
@@ -123,7 +123,7 @@
 
       <div id="mode2Screen" class="hud-mode-screen">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 (↑/↓キーで移動)</div>
+          <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 (↑/↓キーで履歴切り替え)</div>
           <div>
             <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
             <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
@@ -164,18 +164,18 @@
     let totalLength = 0;
     let isProcessing = false;
 
-    // 会話履歴配列と現在閲覧インデックス
+    // 会話履歴配列（最大10件）と閲覧インデックス
     let historyList = [];
     let historyIndex = -1;
 
     function getDisplayText() {
       if (historyList.length === 0) {
         return currentMode === 1 
-          ? "自動トリガー (1/2):\n音声入力待機中..." 
-          : "PTT 翻訳 (2/2):\nタップ操作で送信";
+          ? "音声入力待機中...\n（相手の発言を検知すると自動表示されます）" 
+          : "タップ操作で音声送信\n（ボタンを押して会話を開始）";
       }
       const item = historyList[historyIndex];
-      const navInfo = `[${historyIndex + 1}/${historyList.length}] (▲/▼または↑/↓で移動)\n`;
+      const navInfo = `[${historyIndex + 1}/${historyList.length}] -------------------\n`;
       return navInfo + item;
     }
 
@@ -282,11 +282,11 @@
           const chatData = await chatResponse.json();
           const aiReply = chatData.choices[0].message.content;
 
-          // 履歴の末尾に追加（最大10件保持）
+          // 会話ログを保存（最大10件）
           historyList.push(aiReply);
           if (historyList.length > 10) historyList.shift();
           
-          // 最新ログを表示位置にセット
+          // 新しい会話が入ったら自動的に最新ログ（末尾）を表示
           historyIndex = historyList.length - 1;
 
           await updateDisplays();
@@ -324,7 +324,7 @@
       }
     };
 
-    // グローバルキーボードイベント（キーボード操作を常にキャッチ）
+    // グローバルキーボードイベント（↑/↓キー操作）
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -385,7 +385,7 @@
             }
           }
 
-          // SDK側の全イベント種別（Up/Down/Scroll/Flick等）に対応
+          // G2実機のスワイプ/ボタンイベント（Up / Down）
           const evt = sysType || textType;
           if (evt === OsEventTypeList.UP_EVENT || evt === OsEventTypeList.SCROLL_UP_EVENT || evt === OsEventTypeList.FLICK_UP_EVENT) {
             window.navigateHistory('up');
