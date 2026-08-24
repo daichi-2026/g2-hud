@@ -57,6 +57,7 @@
       display: flex;
       flex-direction: column;
       position: relative;
+      overflow: hidden;
     }
     .hud-mode-screen {
       display: none;
@@ -65,6 +66,21 @@
     }
     .hud-mode-screen.active {
       display: flex;
+    }
+    /* テキスト表示エリアに縦スクロールを追加 */
+    .text-scroll-area {
+      flex: 1;
+      overflow-y: auto;
+      margin-top: 4px;
+      padding-right: 4px;
+    }
+    /* スクロールバーの見た目をダークモード化 */
+    .text-scroll-area::-webkit-scrollbar {
+      width: 6px;
+    }
+    .text-scroll-area::-webkit-scrollbar-thumb {
+      background: #00AA00;
+      border-radius: 3px;
     }
     .control-panel {
       width: 400px;
@@ -125,7 +141,9 @@
           </div>
         </div>
         <div id="m1-status" style="color:#888; font-size:11px; margin-top:2px;">音声入力待機中...</div>
-        <div id="m1-text" style="color:#fff; font-size:12px; font-weight:bold; margin-top:4px; white-space:pre-wrap;">-</div>
+        <div class="text-scroll-area">
+          <div id="m1-text" style="color:#fff; font-size:12px; font-weight:bold; white-space:pre-wrap;">-</div>
+        </div>
       </div>
 
       <div id="mode2Screen" class="hud-mode-screen">
@@ -137,7 +155,9 @@
           </div>
         </div>
         <div id="m2-status" style="color:#888; font-size:11px; margin-top:2px;">ボタンで音声送信</div>
-        <div id="m2-text" style="color:#fff; font-size:12px; font-weight:bold; margin-top:4px; white-space:pre-wrap;">-</div>
+        <div class="text-scroll-area">
+          <div id="m2-text" style="color:#fff; font-size:12px; font-weight:bold; white-space:pre-wrap;">-</div>
+        </div>
       </div>
     </div>
   </div>
@@ -145,12 +165,19 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v1.2 (修正3回目)</span>
+      <span class="version-badge" id="versionBadge">v1.3 (修正3回目)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
     </div>
+    
+    <div>
+      <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">300</span></label>
+      <input type="range" id="noiseThreshold" min="50" max="2000" value="300" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※この値以下の環境音・ノイズは「無音」として無視されます</div>
+    </div>
+
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
     <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信（画面2用）</button>
     <button onclick="clearHistory()" style="background:#cc3333; margin-top:5px;">🗑️ 履歴をクリア</button>
@@ -169,7 +196,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v1.2 (修正3回目)";
+    const APP_VERSION = "v1.3 (修正3回目)";
 
     let bridge = null;
     let currentMode = 1;
@@ -178,7 +205,6 @@
     let totalBytes = 0;
     let isProcessing = false;
     let silenceTimer = null;
-    let recordingStartTime = null;
 
     let historyList = [];
     let historyIndex = -1;
@@ -209,6 +235,19 @@
       if (Array.isArray(pcmData)) return new Uint8Array(pcmData);
       if (ArrayBuffer.isView(pcmData)) return new Uint8Array(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength);
       return null;
+    }
+
+    // 音量（RMS）を計算する関数
+    function calculateRMS(uint8Array) {
+      if (!uint8Array || uint8Array.length < 2) return 0;
+      const dataView = new DataView(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
+      let sum = 0;
+      const samples = Math.floor(uint8Array.byteLength / 2);
+      for (let i = 0; i < samples; i++) {
+        const sample = dataView.getInt16(i * 2, true);
+        sum += sample * sample;
+      }
+      return Math.sqrt(sum / samples);
     }
 
     function createWavBlob(chunks, dataSize) {
@@ -288,7 +327,6 @@
 
       if (totalBytes < 4000) {
         setStatus(`データ不足のためスキップ (${totalBytes} bytes)`);
-        recordingStartTime = null;
         return;
       }
 
@@ -298,7 +336,6 @@
       
       pcmChunks = [];
       totalBytes = 0;
-      recordingStartTime = null;
 
       try {
         setStatus(`Whisperへ送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
@@ -381,31 +418,29 @@
     function handleAudioData(normalized) {
       if (isProcessing) return;
 
-      if (!recordingStartTime) {
-        recordingStartTime = Date.now();
-      }
+      const rms = calculateRMS(normalized);
+      const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 300;
 
-      pcmChunks.push(normalized);
-      totalBytes += normalized.length;
+      // 音量が閾値を超えている場合のみ発言データとして追加
+      if (rms >= threshold) {
+        pcmChunks.push(normalized);
+        totalBytes += normalized.length;
 
-      if (currentMode === 1) {
-        setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB)`);
+        if (currentMode === 1) {
+          setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
 
-        const elapsedTime = Date.now() - recordingStartTime;
-
-        // 5秒経過した場合は無音を待たずに送信
-        if (elapsedTime >= 5000 || totalBytes > 300 * 1024) {
-          flushAndTranscribe();
-          return;
+          if (silenceTimer) clearTimeout(silenceTimer);
+          silenceTimer = setTimeout(() => {
+            if (currentMode === 1 && !isProcessing) {
+              flushAndTranscribe();
+            }
+          }, 1200);
         }
-
-        // 1.0秒間の無音で自動送信
-        if (silenceTimer) clearTimeout(silenceTimer);
-        silenceTimer = setTimeout(() => {
-          if (currentMode === 1 && !isProcessing) {
-            flushAndTranscribe();
-          }
-        }, 1000);
+      } else {
+        // 閾値以下のノイズ時はログ表示のみ更新（バッファ追加・タイマーリセットは行わない）
+        if (currentMode === 1 && totalBytes > 0) {
+          setStatus(`無音判定中... (${Math.round(totalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
+        }
       }
     }
 
@@ -539,7 +574,6 @@
       pcmChunks = [];
       totalBytes = 0;
       isProcessing = false;
-      recordingStartTime = null;
       if (silenceTimer) clearTimeout(silenceTimer);
       updateUIOnly(currentMode);
       updateDisplays();
