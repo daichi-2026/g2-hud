@@ -145,7 +145,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v1.1 (修正2回目)</span>
+      <span class="version-badge" id="versionBadge">v1.2 (修正3回目)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -169,7 +169,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v1.1 (修正2回目)";
+    const APP_VERSION = "v1.2 (修正3回目)";
 
     let bridge = null;
     let currentMode = 1;
@@ -178,6 +178,7 @@
     let totalBytes = 0;
     let isProcessing = false;
     let silenceTimer = null;
+    let recordingStartTime = null;
 
     let historyList = [];
     let historyIndex = -1;
@@ -287,6 +288,7 @@
 
       if (totalBytes < 4000) {
         setStatus(`データ不足のためスキップ (${totalBytes} bytes)`);
+        recordingStartTime = null;
         return;
       }
 
@@ -296,6 +298,7 @@
       
       pcmChunks = [];
       totalBytes = 0;
+      recordingStartTime = null;
 
       try {
         setStatus(`Whisperへ送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
@@ -375,14 +378,35 @@
       }
     }
 
-    function resetSilenceTimer() {
-      if (silenceTimer) clearTimeout(silenceTimer);
-      // 無音検知を1.5秒に延長して文章の途中切れを防止
-      silenceTimer = setTimeout(() => {
-        if (currentMode === 1 && !isProcessing) {
+    function handleAudioData(normalized) {
+      if (isProcessing) return;
+
+      if (!recordingStartTime) {
+        recordingStartTime = Date.now();
+      }
+
+      pcmChunks.push(normalized);
+      totalBytes += normalized.length;
+
+      if (currentMode === 1) {
+        setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB)`);
+
+        const elapsedTime = Date.now() - recordingStartTime;
+
+        // 5秒経過した場合は無音を待たずに送信
+        if (elapsedTime >= 5000 || totalBytes > 300 * 1024) {
           flushAndTranscribe();
+          return;
         }
-      }, 1500);
+
+        // 1.0秒間の無音で自動送信
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          if (currentMode === 1 && !isProcessing) {
+            flushAndTranscribe();
+          }
+        }, 1000);
+      }
     }
 
     async function updateDisplays() {
@@ -454,20 +478,7 @@
           if (rawPcm) {
             const normalized = normalizePcm(rawPcm);
             if (normalized && normalized.length > 0) {
-              if (!isProcessing) {
-                pcmChunks.push(normalized);
-                totalBytes += normalized.length;
-
-                if (currentMode === 1) {
-                  setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB)`);
-                  resetSilenceTimer();
-
-                  // 600KB（約9.5秒分）まで溜められるように上限を拡張
-                  if (totalBytes > 600 * 1024) {
-                    flushAndTranscribe();
-                  }
-                }
-              }
+              handleAudioData(normalized);
             }
           }
 
@@ -528,6 +539,7 @@
       pcmChunks = [];
       totalBytes = 0;
       isProcessing = false;
+      recordingStartTime = null;
       if (silenceTimer) clearTimeout(silenceTimer);
       updateUIOnly(currentMode);
       updateDisplays();
