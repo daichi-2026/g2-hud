@@ -161,6 +161,7 @@
     let pcmChunks = [];
     let totalBytes = 0;
     let isProcessing = false;
+    let silenceTimer = null;
 
     let historyList = [];
     let historyIndex = -1;
@@ -232,17 +233,11 @@
       }
     }
 
-    // ノイズやループ（the the the...）の排除
     function isNoiseOrFiller(text) {
       if (!text) return true;
       const clean = text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-      
-      // 同じ単語の繰返しパターンを検知 (例: the the the)
       const words = clean.split(/\s+/);
-      if (words.length >= 3) {
-        const firstWord = words[0];
-        if (words.every(w => w === firstWord)) return true;
-      }
+      if (words.length >= 3 && words.every(w => w === words[0])) return true;
 
       const hallucinationPhrases = [
         'thank you for watching',
@@ -268,14 +263,7 @@
         return;
       }
 
-      if (totalBytes < 16000) { 
-        pcmChunks = [];
-        totalBytes = 0;
-        setStatus('待機中...');
-        return;
-      }
-
-      if (isProcessing) return;
+      if (totalBytes < 16000 || isProcessing) return;
 
       isProcessing = true;
       const chunksToProcess = [...pcmChunks];
@@ -330,10 +318,7 @@
 (カタカナフリガナ)
 (日本語訳)`
                 },
-                {
-                  role: 'user',
-                  content: enText
-                }
+                { role: 'user', content: enText }
               ]
             })
           });
@@ -343,45 +328,49 @@
 
           historyList.push(aiReply);
           if (historyList.length > 10) historyList.shift();
-          
-          // 最新の履歴を表示
           historyIndex = historyList.length - 1;
 
           await updateDisplays();
           setStatus('完了！');
         } else {
-          setStatus('ノイズ/ループ音声を無視しました');
+          setStatus('待機中...');
         }
       } catch (e) {
         console.error(e);
         setStatus('エラー: ' + e.message);
       } finally {
         isProcessing = false;
+        if (currentMode === 1 && totalBytes >= 32000) {
+          resetSilenceTimer();
+        }
       }
+    }
+
+    function resetSilenceTimer() {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      // 音声が途切れて1.2秒経過したら発話終了と判定して送信
+      silenceTimer = setTimeout(() => {
+        if (currentMode === 1) {
+          flushAndTranscribe();
+        }
+      }, 1200);
     }
 
     async function updateDisplays() {
       const displayText = getDisplayText();
-      
       document.getElementById('m1-text').innerText = displayText;
       document.getElementById('m2-text').innerText = displayText;
-
       await sendToG2Display(displayText);
     }
 
     window.navigateHistory = async function(direction) {
       if (historyList.length === 0) return;
-
-      if (direction === 'up') {
-        if (historyIndex > 0) {
-          historyIndex--;
-          await updateDisplays();
-        }
-      } else if (direction === 'down') {
-        if (historyIndex < historyList.length - 1) {
-          historyIndex++;
-          await updateDisplays();
-        }
+      if (direction === 'up' && historyIndex > 0) {
+        historyIndex--;
+        await updateDisplays();
+      } else if (direction === 'down' && historyIndex < historyList.length - 1) {
+        historyIndex++;
+        await updateDisplays();
       }
     };
 
@@ -439,8 +428,8 @@
               pcmChunks.push(normalized);
               totalBytes += normalized.length;
 
-              if (currentMode === 1 && totalBytes >= 80000) {
-                flushAndTranscribe();
+              if (currentMode === 1) {
+                resetSilenceTimer();
               }
             }
           }
@@ -501,6 +490,7 @@
       currentMode = mode;
       pcmChunks = [];
       totalBytes = 0;
+      if (silenceTimer) clearTimeout(silenceTimer);
       updateUIOnly(currentMode);
       updateDisplays();
     };
