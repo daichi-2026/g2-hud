@@ -76,7 +76,15 @@
       font-size: 13px;
       overflow-y: auto;
     }
-    .control-panel h2 { color: #00FF00; font-size: 16px; margin: 0 0 5px 0; }
+    .control-panel h2 { color: #00FF00; font-size: 16px; margin: 0 0 5px 0; display: flex; align-items: center; justify-content: space-between; }
+    .version-badge {
+      background: #00FF00;
+      color: #000;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: bold;
+    }
     input, button {
       background: #222;
       border: 1px solid #444;
@@ -135,7 +143,10 @@
   </div>
 
   <div class="control-panel">
-    <h2>G2 音声翻訳＆返答アシスト</h2>
+    <h2>
+      <span>G2 音声翻訳＆返答アシスト</span>
+      <span class="version-badge" id="versionBadge">v1.0 (修正1回目)</span>
+    </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
@@ -157,6 +168,8 @@
       TextContainerUpgrade,
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
+
+    const APP_VERSION = "v1.0 (修正1回目)";
 
     let bridge = null;
     let currentMode = 1;
@@ -281,7 +294,6 @@
       const chunksToProcess = [...pcmChunks];
       const bytesToProcess = totalBytes;
       
-      // バッファをクリアして次の音声をいつでも受容できるようにする
       pcmChunks = [];
       totalBytes = 0;
 
@@ -292,7 +304,7 @@
         const formData = new FormData();
         formData.append('file', wavBlob, 'audio.wav');
         formData.append('model', 'whisper-1');
-        formData.append('language', 'en'); // 英語として認識させて精度を上げる
+        formData.append('language', 'en');
 
         const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
           method: 'POST',
@@ -359,14 +371,12 @@
         console.error(e);
         setStatus('エラー: ' + e.message);
       } finally {
-        // 確実にロックを解除
         isProcessing = false;
       }
     }
 
     function resetSilenceTimer() {
       if (silenceTimer) clearTimeout(silenceTimer);
-      // 無音が1.0秒続いたら自動送信
       silenceTimer = setTimeout(() => {
         if (currentMode === 1 && !isProcessing) {
           flushAndTranscribe();
@@ -411,7 +421,7 @@
 
     async function initG2() {
       try {
-        setStatus("G2ブリッジ接続中...");
+        setStatus(`G2ブリッジ接続中... [${APP_VERSION}]`);
         bridge = await waitForEvenAppBridge();
         
         const mainText = new TextContainerProperty({
@@ -436,14 +446,13 @@
         );
 
         await bridge.audioControl(true);
-        setStatus("G2 SDK 接続完了 / マイクON\n音声待機中...");
+        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON\n音声待機中...`);
 
         bridge.onEvenHubEvent(async event => {
           const rawPcm = event.audioEvent?.audioPcm;
           if (rawPcm) {
             const normalized = normalizePcm(rawPcm);
             if (normalized && normalized.length > 0) {
-              // API処理中（isProcessing === true）の音声は捨てて混入を防ぐ
               if (!isProcessing) {
                 pcmChunks.push(normalized);
                 totalBytes += normalized.length;
@@ -452,7 +461,6 @@
                   setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB)`);
                   resetSilenceTimer();
 
-                  // 250KB（約4秒分）を超えたら無音を待たずに切って送信
                   if (totalBytes > 250 * 1024) {
                     flushAndTranscribe();
                   }
