@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v1.6 (フォーマット完全修正版)</span>
+      <span class="version-badge" id="versionBadge">v1.7 (無音&表示最適化版)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -194,7 +194,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v1.6 (フォーマット完全修正版)";
+    const APP_VERSION = "v1.7 (無音&表示最適化版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -425,11 +425,12 @@
           setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
 
           if (silenceTimer) clearTimeout(silenceTimer);
+          // 息継ぎでの途切れを防ぐため無音判定タイマーを1000ms（1.0秒）に設定
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
             }
-          }, 600);
+          }, 1000);
         }
       } else {
         if (currentMode === 1 && totalBytes > 0) {
