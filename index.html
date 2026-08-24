@@ -175,7 +175,7 @@
       return navInfo + item;
     }
 
-    // 音声データのRMS音量をチェック（無音・静かなノイズの検知）
+    // 音声データのRMS音量をチェック（音量閾値を大幅に上げてノイズや無音をカット）
     function isAudioQuiet(pcmChunks) {
       let sum = 0;
       let count = 0;
@@ -189,7 +189,7 @@
       }
       if (count === 0) return true;
       const rms = Math.sqrt(sum / count);
-      return rms < 300; // しきい値（クリック音や無音はカット）
+      return rms < 1200; // はっきりした話し声以外は無視
     }
 
     function pcmToWavBlob(pcmChunks, totalLen) {
@@ -218,14 +218,25 @@
       return new Blob([wavBytes], { type: 'audio/wav' });
     }
 
+    // Whisperのハルシネーション（幻聴）およびノイズ文字列の判定
     function isNoiseOrFiller(text) {
       if (!text) return true;
-      const clean = text.toLowerCase().replace(/[^a-z]/g, '').trim();
+      const clean = text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
       
-      // 無視するノイズ・単語リスト
-      const noiseWords = ['you', 'thankyou', 'bye', 'mb', 'subtitles', 'amara', 'click', 'ignore', 'ignoreclicknoises', 'noises'];
+      const hallucinationPhrases = [
+        'thank you for watching',
+        'thanks for watching',
+        'subtitles by',
+        'amara.org',
+        'ignore click noises',
+        'click noises',
+        'subscribe',
+        'you'
+      ];
+
       if (clean.length < 3) return true;
-      if (noiseWords.some(w => clean.includes(w))) return true;
+      if (hallucinationPhrases.some(p => clean.includes(p))) return true;
+
       return false;
     }
 
@@ -242,9 +253,9 @@
       pcmBuffer = [];
       totalLength = 0;
 
-      // 無音またはクリック音のみの場合はスキップ
+      // 無音や小さい環境音はAPIに送らず破棄
       if (isAudioQuiet(chunksToProcess)) {
-        setStatus('無音/ノイズをスキップしました');
+        setStatus('無音/ノイズのため処理をスキップしました');
         isProcessing = false;
         return;
       }
@@ -266,6 +277,7 @@
         const data = await response.json();
         const enText = data.text ? data.text.trim() : '';
 
+        // ハルシネーション以外の有効な発言のみ処理
         if (!isNoiseOrFiller(enText)) {
           setStatus('AIが和訳＆返答を生成中...');
 
@@ -310,7 +322,7 @@
           await updateDisplays();
           setStatus('完了！');
         } else {
-          setStatus('ノイズを無視しました');
+          setStatus('無効な音声（ハルシネーション/ノイズ）を無視しました');
         }
       } catch (e) {
         setStatus('エラー: ' + e.message);
