@@ -157,8 +157,8 @@
     let bridge = null;
     let currentMode = 1;
 
-    let pcmBuffer = [];
-    let totalLength = 0;
+    let pcmChunks = [];
+    let totalBytes = 0;
     let isProcessing = false;
 
     let historyList = [];
@@ -175,45 +175,76 @@
       return navInfo + item;
     }
 
-    function pcmToWavBlob(pcmChunks, totalLen) {
-      const wavHeader = new ArrayBuffer(44);
-      const view = new DataView(wavHeader);
-      view.setUint32(0, 0x52494646, false);
-      view.setUint32(4, 36 + totalLen, true);
-      view.setUint32(8, 0x57415645, false);
-      view.setUint32(12, 0x666d7420, false);
-      view.setUint16(20, 1, true);
-      view.setUint16(22, 1, true);
-      view.setUint32(24, 16000, true);
-      view.setUint32(28, 32000, true);
-      view.setUint16(32, 2, true);
-      view.setUint16(34, 16, true);
-      view.setUint32(36, 0x64617461, false);
-      view.setUint32(40, totalLen, true);
-
-      const wavBytes = new Uint8Array(44 + totalLen);
-      wavBytes.set(new Uint8Array(wavHeader), 0);
-      let offset = 44;
-      for (const chunk of pcmChunks) {
-        wavBytes.set(chunk, offset);
-        offset += chunk.length;
+    // 多様なPCM形式（Base64 / Uint8Array / Array / Int16Array）を Uint8Array に正規化
+    function normalizePcm(pcmData) {
+      if (!pcmData) return null;
+      if (typeof pcmData === 'string') {
+        const binary = atob(pcmData);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
       }
-      return new Blob([wavBytes], { type: 'audio/wav' });
+      if (pcmData instanceof Uint8Array) return pcmData;
+      if (pcmData instanceof ArrayBuffer) return new Uint8Array(pcmData);
+      if (Array.isArray(pcmData)) return new Uint8Array(pcmData);
+      if (ArrayBuffer.isView(pcmData)) return new Uint8Array(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength);
+      return null;
     }
 
-    // 意味のない単語やWhisperの幻聴フレーズを弾く
+    function createWavBlob(chunks, dataSize) {
+      const sampleRate = 16000;
+      const numChannels = 1;
+      const bitsPerSample = 16;
+      
+      const buffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buffer);
+
+      // RIFF header
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      writeString(view, 8, 'WAVE');
+
+      // fmt chunk
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true); // Subchunk1Size (16 for PCM)
+      view.setUint16(20, 1, true);  // AudioFormat (1 = PCM)
+      view.setUint16(22, numChannels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true); // ByteRate
+      view.setUint16(32, numChannels * (bitsPerSample / 8), true); // BlockAlign
+      view.setUint16(34, bitsPerSample, true);
+
+      // data chunk
+      writeString(view, 36, 'data');
+      view.setUint32(40, dataSize, true);
+
+      // Copy PCM data
+      let offset = 44;
+      for (const chunk of chunks) {
+        new Uint8Array(buffer, offset, chunk.byteLength).set(chunk);
+        offset += chunk.byteLength;
+      }
+
+      return new Blob([buffer], { type: 'audio/wav' });
+    }
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
     function isNoiseOrFiller(text) {
       if (!text) return true;
       const clean = text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-      
       const hallucinationPhrases = [
         'thank you for watching',
         'thanks for watching',
         'subtitles by',
         'amara.org',
         'click noises',
-        'ignore click',
-        'ignore',
         'subscribe',
         'you'
       ];
@@ -226,29 +257,32 @@
 
     async function flushAndTranscribe() {
       const apiKey = document.getElementById('apiKey').value.trim();
-      
-      // データ長が短すぎる場合はAPIエラーになるため即リセットしてスキップ
-      if (totalLength < 16000) { 
-        pcmBuffer = [];
-        totalLength = 0;
-        setStatus('待機中...');
+
+      if (!apiKey) {
+        setStatus('API Keyを入力してください');
         return;
       }
 
-      if (isProcessing || !apiKey) {
-        if (!apiKey) setStatus('API Keyを入力してください');
+      // 最低限のデータサイズチェック (約0.5秒分以上: 16000Hz * 2bytes * 0.5s = 16000 bytes)
+      if (totalBytes < 16000) { 
+        pcmChunks = [];
+        totalBytes = 0;
+        setStatus('音声データ不足（待機中）');
         return;
       }
+
+      if (isProcessing) return;
 
       isProcessing = true;
-      const chunksToProcess = [...pcmBuffer];
-      const lenToProcess = totalLength;
-      pcmBuffer = [];
-      totalLength = 0;
+      const chunksToProcess = [...pcmChunks];
+      const bytesToProcess = totalBytes;
+      pcmChunks = [];
+      totalBytes = 0;
 
       try {
         setStatus('Whisperで文字起こし中...');
-        const wavBlob = pcmToWavBlob(chunksToProcess, lenToProcess);
+        const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
+        
         const formData = new FormData();
         formData.append('file', wavBlob, 'audio.wav');
         formData.append('model', 'whisper-1');
@@ -260,8 +294,9 @@
         });
 
         if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(`Whisper Error: ${errData.error?.message || response.statusText}`);
+          const errJson = await response.json().catch(() => ({}));
+          console.error("Whisper API Error response:", errJson);
+          throw new Error(errJson.error?.message || `HTTP ${response.status}`);
         }
 
         const data = await response.json();
@@ -311,9 +346,10 @@
           await updateDisplays();
           setStatus('完了！');
         } else {
-          setStatus('音声なし（スキップ）');
+          setStatus('音声なし（ノイズと判定）');
         }
       } catch (e) {
+        console.error(e);
         setStatus('エラー: ' + e.message);
       } finally {
         isProcessing = false;
@@ -383,14 +419,17 @@
         setStatus("G2 SDK 接続完了 / マイクON");
 
         bridge.onEvenHubEvent(async event => {
-          const pcm = event.audioEvent?.audioPcm;
-          if (pcm) {
-            pcmBuffer.push(pcm);
-            totalLength += pcm.length;
+          const rawPcm = event.audioEvent?.audioPcm;
+          if (rawPcm) {
+            const normalized = normalizePcm(rawPcm);
+            if (normalized && normalized.length > 0) {
+              pcmChunks.push(normalized);
+              totalBytes += normalized.length;
 
-            // 約2秒分の音声が溜まったら送信
-            if (currentMode === 1 && totalLength > 32000 * 2) {
-              flushAndTranscribe();
+              // 自動トリガーモード：約2.5秒分（80000 bytes）溜まったらWhisperへ送信
+              if (currentMode === 1 && totalBytes >= 80000) {
+                flushAndTranscribe();
+              }
             }
           }
 
@@ -448,8 +487,8 @@
 
     window.switchMode = function(mode) {
       currentMode = mode;
-      pcmBuffer = [];
-      totalLength = 0;
+      pcmChunks = [];
+      totalBytes = 0;
       updateUIOnly(currentMode);
       updateDisplays();
     };
