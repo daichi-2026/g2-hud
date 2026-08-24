@@ -256,14 +256,19 @@
     }
 
     async function flushAndTranscribe() {
-      const apiKey = document.getElementById('apiKey').value.trim();
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
 
+      const apiKey = document.getElementById('apiKey').value.trim();
       if (!apiKey) {
         setStatus('API Keyを入力してください');
         return;
       }
 
-      if (totalBytes < 16000 || isProcessing) return;
+      // 最低限の音声サイズ（約0.25秒分）がないか、処理中ならスキップ
+      if (totalBytes < 8000 || isProcessing) return;
 
       isProcessing = true;
       const chunksToProcess = [...pcmChunks];
@@ -333,22 +338,19 @@
           await updateDisplays();
           setStatus('完了！');
         } else {
-          setStatus('待機中...');
+          setStatus('音声待機中...');
         }
       } catch (e) {
         console.error(e);
         setStatus('エラー: ' + e.message);
       } finally {
         isProcessing = false;
-        if (currentMode === 1 && totalBytes >= 32000) {
-          resetSilenceTimer();
-        }
       }
     }
 
     function resetSilenceTimer() {
       if (silenceTimer) clearTimeout(silenceTimer);
-      // 音声が途切れて1.2秒経過したら発話終了と判定して送信
+      // 音声が1.2秒途切れたら送信実行
       silenceTimer = setTimeout(() => {
         if (currentMode === 1) {
           flushAndTranscribe();
@@ -429,6 +431,7 @@
               totalBytes += normalized.length;
 
               if (currentMode === 1) {
+                setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB)`);
                 resetSilenceTimer();
               }
             }
