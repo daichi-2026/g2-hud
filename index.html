@@ -67,14 +67,12 @@
     .hud-mode-screen.active {
       display: flex;
     }
-    /* テキスト表示エリアに縦スクロールを追加 */
     .text-scroll-area {
       flex: 1;
       overflow-y: auto;
       margin-top: 4px;
       padding-right: 4px;
     }
-    /* スクロールバーの見た目をダークモード化 */
     .text-scroll-area::-webkit-scrollbar {
       width: 6px;
     }
@@ -165,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v1.3 (修正3回目)</span>
+      <span class="version-badge" id="versionBadge">v1.4 (修正4回目)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -196,7 +194,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v1.3 (修正3回目)";
+    const APP_VERSION = "v1.4 (修正4回目)";
 
     let bridge = null;
     let currentMode = 1;
@@ -237,7 +235,6 @@
       return null;
     }
 
-    // 音量（RMS）を計算する関数
     function calculateRMS(uint8Array) {
       if (!uint8Array || uint8Array.length < 2) return 0;
       const dataView = new DataView(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
@@ -289,24 +286,21 @@
       }
     }
 
+    // ノイズ判定ロジックの適正化（過剰なキーワード判定を排除）
     function isNoiseOrFiller(text) {
       if (!text) return true;
-      const clean = text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-      const words = clean.split(/\s+/);
-      if (words.length >= 3 && words.every(w => w === words[0])) return true;
+      const clean = text.trim();
+      if (clean.length <= 1) return true;
 
-      const hallucinationPhrases = [
+      const cleanLower = clean.toLowerCase();
+      const strictHallucinations = [
         'thank you for watching',
         'thanks for watching',
         'subtitles by',
-        'amara.org',
-        'click noises',
-        'subscribe',
-        'you'
+        'amara.org'
       ];
 
-      if (clean.length < 2) return true;
-      if (hallucinationPhrases.some(p => clean === p || clean.includes(p))) return true;
+      if (strictHallucinations.some(p => cleanLower === p)) return true;
 
       return false;
     }
@@ -421,7 +415,6 @@
       const rms = calculateRMS(normalized);
       const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 300;
 
-      // 音量が閾値を超えている場合のみ発言データとして追加
       if (rms >= threshold) {
         pcmChunks.push(normalized);
         totalBytes += normalized.length;
@@ -437,7 +430,6 @@
           }, 1200);
         }
       } else {
-        // 閾値以下のノイズ時はログ表示のみ更新（バッファ追加・タイマーリセットは行わない）
         if (currentMode === 1 && totalBytes > 0) {
           setStatus(`無音判定中... (${Math.round(totalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
         }
