@@ -201,7 +201,7 @@
       return new Blob([wavBytes], { type: 'audio/wav' });
     }
 
-    // Whisperのハルシネーション（無音時の勝手なテキスト）やノイズ判定
+    // 意味のない単語やWhisperの幻聴フレーズを弾く
     function isNoiseOrFiller(text) {
       if (!text) return true;
       const clean = text.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
@@ -226,7 +226,16 @@
 
     async function flushAndTranscribe() {
       const apiKey = document.getElementById('apiKey').value.trim();
-      if (isProcessing || pcmBuffer.length === 0 || !apiKey) {
+      
+      // データ長が短すぎる場合はAPIエラーになるため即リセットしてスキップ
+      if (totalLength < 16000) { 
+        pcmBuffer = [];
+        totalLength = 0;
+        setStatus('待機中...');
+        return;
+      }
+
+      if (isProcessing || !apiKey) {
         if (!apiKey) setStatus('API Keyを入力してください');
         return;
       }
@@ -250,11 +259,14 @@
           body: formData
         });
 
-        if (!response.ok) throw new Error(`Whisper API Error: ${response.statusText}`);
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(`Whisper Error: ${errData.error?.message || response.statusText}`);
+        }
+
         const data = await response.json();
         const enText = data.text ? data.text.trim() : '';
 
-        // 有効な声（発言）である場合のみGPTに渡して画面更新
         if (!isNoiseOrFiller(enText)) {
           setStatus('AIが和訳＆返答を生成中...');
 
@@ -299,7 +311,7 @@
           await updateDisplays();
           setStatus('完了！');
         } else {
-          setStatus('音声なし（ノイズ/無音を無視）');
+          setStatus('音声なし（スキップ）');
         }
       } catch (e) {
         setStatus('エラー: ' + e.message);
@@ -376,6 +388,7 @@
             pcmBuffer.push(pcm);
             totalLength += pcm.length;
 
+            // 約2秒分の音声が溜まったら送信
             if (currentMode === 1 && totalLength > 32000 * 2) {
               flushAndTranscribe();
             }
