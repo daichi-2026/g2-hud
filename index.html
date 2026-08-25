@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v2.5 (Whisper補正強化)</span>
+      <span class="version-badge" id="versionBadge">v2.7</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -175,10 +175,11 @@
       <input type="range" id="noiseThreshold" min="50" max="2000" value="250" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
     </div>
 
+    <!-- ★スライダーの設定：最小 0.05秒、刻み 0.05秒、初期値 0.05秒 に変更 -->
     <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.6</span>秒</label>
-      <input type="range" id="silenceSec" min="0.3" max="3.0" step="0.1" value="0.6" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※頭欠け防止のため 0.5〜0.7秒 推奨</div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.05</span>秒</label>
+      <input type="range" id="silenceSec" min="0.05" max="3.00" step="0.05" value="0.05" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = parseFloat(this.value).toFixed(2)" />
+      <div style="font-size:10px; color:#888;">※最速設定: 0.05秒（息継ぎや小さな間で即座に送信）</div>
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -199,7 +200,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v2.5 (Whisper補正強化)";
+    const APP_VERSION = "v2.7";
 
     let bridge = null;
     let currentMode = 1;
@@ -207,7 +208,6 @@
     let activePcmChunks = [];
     let activeTotalBytes = 0;
     
-    // 話し始めの頭欠けを防ぐためのバッファリング (直近3フレーム保持)
     let preRingBuffer = [];
     const MAX_PRE_BUFFER = 3;
 
@@ -276,6 +276,7 @@
       view.setUint16(20, 1, true);
       view.setUint16(22, numChannels, true);
       view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
       view.setUint16(32, numChannels * (bitsPerSample / 8), true);
       view.setUint16(34, bitsPerSample, true);
 
@@ -344,7 +345,7 @@
       activeTotalBytes = 0;
 
       try {
-        setStatus(`Whisperへ補正送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
+        setStatus(`Whisperへ送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
         
         const formData = new FormData();
@@ -353,7 +354,6 @@
         formData.append('language', 'en');
         formData.append('temperature', '0');
 
-        // Whisper認識精度向上のためのPrompt（文脈指示）
         const promptText = "It's already late August, but it's still so hot. Everyday conversation about weather, greetings, and daily life.";
         formData.append('prompt', promptText);
 
@@ -500,7 +500,7 @@
         isProcessing = false;
 
         if (activeTotalBytes > 0) {
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 600;
+          const silenceMs = Math.max(50, parseFloat(document.getElementById('silenceSec').value) * 1000);
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -515,7 +515,6 @@
       const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 250;
 
       if (rms >= threshold) {
-        // 発話検知時、直前のプリバッファ（話し始めの頭音）を結合
         if (activePcmChunks.length === 0 && preRingBuffer.length > 0) {
           for (const preChunk of preRingBuffer) {
             activePcmChunks.push(preChunk);
@@ -532,7 +531,8 @@
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 600;
+          // ★ここでスライダーの値（最小50ms = 0.05秒）をダイレクトに読み込み
+          const silenceMs = Math.max(50, parseFloat(document.getElementById('silenceSec').value) * 1000);
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -540,7 +540,6 @@
           }, silenceMs);
         }
       } else {
-        // 無音時は直前数フレームを常時保持（話し始めの頭欠け防止）
         if (activePcmChunks.length === 0) {
           preRingBuffer.push(normalized);
           if (preRingBuffer.length > MAX_PRE_BUFFER) {
