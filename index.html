@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>リアルタイム文字起こし・翻訳通訳アシスタント V4.0</title>
+<title>リアルタイム文字起こし・翻訳通訳アシスタント V4.1 (グラス連携対応)</title>
 <style>
   body {
     font-family: sans-serif;
@@ -72,7 +72,7 @@
     font-size: 1.1rem;
     padding: 15px;
     border-radius: 6px;
-    min-height: 200px;
+    min-height: 220px;
     white-space: pre-wrap;
     word-wrap: break-word;
   }
@@ -81,12 +81,18 @@
     display: flex;
     gap: 10px;
   }
+  .glasses-btn {
+    background-color: #28a745;
+  }
+  .glasses-btn:hover {
+    background-color: #218838;
+  }
 </style>
 </head>
 <body>
 
 <div class="container">
-  <h1>リアルタイム文字起こし・翻訳通訳アシスタント V4.0</h1>
+  <h1>リアルタイム文字起こし・翻訳通訳アシスタント V4.1</h1>
 
   <div class="control-panel">
     <div>
@@ -95,7 +101,7 @@
     </div>
     <div>
       <label>DeepL API Key (翻訳):</label>
-      <input type="password" id="deeplKey" placeholder="DeepL Key" />
+      <input type="password" id="deeplKey" placeholder="DeepL Key (:fx 含む)" />
     </div>
     <div>
       <label>OpenAI API Key (返答ヒント用・任意):</label>
@@ -106,13 +112,17 @@
       <input type="number" id="silenceSec" value="1.2" step="0.1" min="0.5" />
     </div>
     <div>
-      <label>操作:</label>
+      <label>グラスディスプレイ操作:</label>
+      <button id="openGlassesBtn" class="glasses-btn">グラス用画面を開く / 再接続</button>
+    </div>
+    <div>
+      <label>録音操作:</label>
       <button id="startBtn">録音開始</button>
       <button id="stopBtn" disabled style="margin-top:5px; background-color:#dc3545;">録音停止</button>
     </div>
   </div>
 
-  <div class="status" id="statusText">ステータス: 待機中 (V4.0 Deepgram + DeepL)</div>
+  <div class="status" id="statusText">ステータス: 待機中 (V4.1)</div>
 
   <div class="display-box" id="displayBox">ここに会話と翻訳、返答ヒントが表示されます...</div>
 
@@ -144,9 +154,12 @@ let historyIndex = -1;
 let currentActiveIndex = -1;
 let currentMode = 0; // 0: 無音待機, 1: 発話中
 
+let glassesWindow = null; // グラス表示用別ウィンドウ参照
+
 // Node / HTML要素
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
+const openGlassesBtn = document.getElementById('openGlassesBtn');
 const statusText = document.getElementById('statusText');
 const displayBox = document.getElementById('displayBox');
 const prevBtn = document.getElementById('prevBtn');
@@ -157,6 +170,7 @@ const nextBtn = document.getElementById('nextBtn');
 // ==========================================
 startBtn.addEventListener('click', startRecording);
 stopBtn.addEventListener('click', stopRecording);
+openGlassesBtn.addEventListener('click', openGlassesDisplay);
 prevBtn.addEventListener('click', showPrevHistory);
 nextBtn.addEventListener('click', showNextHistory);
 
@@ -169,6 +183,51 @@ function isNoiseOrFiller(text) {
   const clean = text.trim().toLowerCase().replace(/[^a-z]/g, '');
   const fillers = ['thankyou', 'thanks', 'you', 'mb', 'bye', 'am', 'so'];
   return clean.length <= 2 || fillers.includes(clean);
+}
+
+// ==========================================
+// スマートグラス（Glasses Display）ウィンドウ制御
+// ==========================================
+function openGlassesDisplay() {
+  glassesWindow = window.open("", "GlassesDisplay", "width=600,height=400,resizable=yes");
+  if (glassesWindow) {
+    glassesWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Glasses Display</title>
+        <style>
+          body {
+            background-color: #000;
+            color: #00ffcc;
+            font-family: monospace;
+            font-size: 1.3rem;
+            padding: 15px;
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+          }
+        </style>
+      </head>
+      <body>
+        <div id="content">Glasses Display Ready...</div>
+      </body>
+      </html>
+    `);
+    glassesWindow.document.close();
+    setStatus("グラス用ウィンドウと接続しました");
+  } else {
+    alert("ポップアップブロックが有効になっている可能性があります。ブラウザの設定で許可してください。");
+  }
+}
+
+function updateGlassesDisplay(text) {
+  if (glassesWindow && !glassesWindow.closed) {
+    const contentDiv = glassesWindow.document.getElementById('content');
+    if (contentDiv) {
+      contentDiv.innerText = text;
+    }
+  }
 }
 
 // ==========================================
@@ -214,7 +273,7 @@ function createWavBlob(pcmChunks, totalBytes) {
 // ==========================================
 async function transcribeAudioWithDeepgram(wavBlob) {
   const deepgramKey = document.getElementById('deepgramKey').value.trim();
-  if (!deepgramKey) throw new Error("Deepgram API Keyが入力されていません");
+  if (!deepgramKey) throw new Error("Deepgram API Keyが未設定です");
 
   const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true';
 
@@ -238,34 +297,42 @@ async function transcribeAudioWithDeepgram(wavBlob) {
 }
 
 // ==========================================
-// API通信部 2: DeepL (日本語翻訳)
+// API通信部 2: DeepL (CORSプロキシ対応付き翻訳)
 // ==========================================
 async function translateTextWithDeepL(text) {
   const deeplKey = document.getElementById('deeplKey').value.trim();
   if (!deeplKey) return "（DeepL Key未設定のため翻訳省略）";
 
-  const endpoint = deeplKey.endsWith(':fx')
+  const targetEndpoint = deeplKey.endsWith(':fx')
     ? 'https://api-free.deepl.com/v2/translate'
     : 'https://api.deepl.com/v2/translate';
+
+  // ブラウザからの直接リクエストによるCORSブロック回避（corsproxy.io利用）
+  const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetEndpoint);
 
   const params = new URLSearchParams();
   params.append('auth_key', deeplKey);
   params.append('text', text);
   params.append('target_lang', 'JA');
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params
-  });
+  try {
+    const response = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
+    });
 
-  if (!response.ok) {
-    console.warn("DeepL Error:", response.status);
-    return "（翻訳エラーが発生しました）";
+    if (!response.ok) {
+      console.warn("DeepL Error Status:", response.status);
+      return "（DeepL翻訳エラー: Keyの不一致または制限）";
+    }
+
+    const data = await response.json();
+    return data.translations[0]?.text || '';
+  } catch (e) {
+    console.error("DeepL Fetch Error:", e);
+    return "（翻訳接続エラー - 通信確認が必要）";
   }
-
-  const data = await response.json();
-  return data.translations[0]?.text || '';
 }
 
 // ==========================================
@@ -330,7 +397,7 @@ async function startRecording() {
     isRecording = true;
     startBtn.disabled = true;
     stopBtn.disabled = false;
-    setStatus("録音中... 発話待機中 (V4.0 Deepgram + DeepL)");
+    setStatus("録音中... 発話待機中");
   } catch (e) {
     alert("マイクの起動に失敗しました: " + e.message);
   }
@@ -347,21 +414,18 @@ function stopRecording() {
   setStatus("停止中");
 }
 
-// 音声入力ストリームの解析（VAD / 閾値判定）
 function processAudio(e) {
   if (!isRecording) return;
 
   const inputData = e.inputBuffer.getChannelData(0);
   
-  // RMS（音量）の計算
   let sum = 0;
   for (let i = 0; i < inputData.length; i++) {
     sum += inputData[i] * inputData[i];
   }
   const rms = Math.sqrt(sum / inputData.length);
-  const threshold = 0.02; // 音量閾値
+  const threshold = 0.02;
 
-  // Float32 -> Int16 PCM 変換
   const pcm16 = new Int16Array(inputData.length);
   for (let i = 0; i < inputData.length; i++) {
     const s = Math.max(-1, Math.min(1, inputData[i]));
@@ -369,7 +433,6 @@ function processAudio(e) {
   }
 
   if (rms > threshold) {
-    // 【発話中】
     activePcmChunks.push(pcm16);
     activeTotalBytes += pcm16.byteLength;
 
@@ -383,12 +446,10 @@ function processAudio(e) {
       silenceTimer = null;
     }
 
-    // 一定サイズ溜まったら文頭のリアルタイム認識を発動
     if (activeTotalBytes - lastPartialBytes > 32000 && !isPartialTranscribing) {
       requestPartialTranscribe();
     }
   } else {
-    // 【無音時】
     if (currentMode === 1) {
       activePcmChunks.push(pcm16);
       activeTotalBytes += pcm16.byteLength;
@@ -450,7 +511,7 @@ async function flushAndTranscribe() {
 
   if (isProcessing) return;
 
-  if (activeTotalBytes < 3200) { // 音声が短すぎる場合はスキップ
+  if (activeTotalBytes < 3200) {
     activePcmChunks = [];
     activeTotalBytes = 0;
     currentActiveIndex = -1;
@@ -519,29 +580,35 @@ async function flushAndTranscribe() {
 }
 
 // ==========================================
-// 履歴ナビゲーション表示制御
+// 履歴＆スマートグラス画面更新制御
 // ==========================================
 async function updateDisplays() {
   if (historyList.length === 0) {
     displayBox.innerText = "会話データがありません";
+    updateGlassesDisplay("会話データがありません");
     return;
   }
 
-  // 最新データを表示
   if (currentActiveIndex !== -1) {
     historyIndex = currentActiveIndex;
   } else if (historyIndex === -1 || historyIndex >= historyList.length) {
     historyIndex = historyList.length - 1;
   }
 
-  displayBox.innerText = historyList[historyIndex];
+  const activeText = historyList[historyIndex];
+  
+  // 1. メインブラウザの画面更新
+  displayBox.innerText = activeText;
+
+  // 2. スマートグラス（Glasses Display）への転送・画面更新
+  updateGlassesDisplay(activeText);
 }
 
 function showPrevHistory() {
   if (historyList.length === 0) return;
   if (historyIndex > 0) {
     historyIndex--;
-    displayBox.innerText = historyList[historyIndex];
+    updateDisplays();
     setStatus(`過去ログ表示中 [${historyIndex + 1}/${historyList.length}]`);
   }
 }
@@ -550,7 +617,7 @@ function showNextHistory() {
   if (historyList.length === 0) return;
   if (historyIndex < historyList.length - 1) {
     historyIndex++;
-    displayBox.innerText = historyList[historyIndex];
+    updateDisplays();
     setStatus(`過去ログ表示中 [${historyIndex + 1}/${historyList.length}]`);
   }
 }
