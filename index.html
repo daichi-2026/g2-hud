@@ -1,589 +1,728 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>リアルタイム文字起こし・翻訳通訳アシスタント V4.3 (G2完全対応)</title>
-<style>
-  body {
-    font-family: sans-serif;
-    margin: 20px;
-    background-color: #f4f4f9;
-  }
-  .container {
-    max-width: 800px;
-    margin: 0 auto;
-    background: #fff;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  }
-  h1 {
-    font-size: 1.5rem;
-    margin-bottom: 15px;
-  }
-  .control-panel {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 20px;
-    background: #eee;
-    padding: 15px;
-    border-radius: 6px;
-  }
-  .control-panel div {
-    display: flex;
-    flex-direction: column;
-  }
-  label {
-    font-size: 0.85rem;
-    font-weight: bold;
-    margin-bottom: 3px;
-  }
-  input, select, button {
-    padding: 8px;
-    font-size: 0.9rem;
-    border-radius: 4px;
-    border: 1px solid #ccc;
-  }
-  button {
-    cursor: pointer;
-    background-color: #007bff;
-    color: white;
-    border: none;
-    font-weight: bold;
-  }
-  button:hover {
-    background-color: #0056b3;
-  }
-  button:disabled {
-    background-color: #cccccc;
-    cursor: not-allowed;
-  }
-  .status {
-    margin-bottom: 15px;
-    font-weight: bold;
-    color: #333;
-  }
-
-  /* G2対応表示領域スタイル (黒背景・緑文字・緑枠線) */
-  .g2-container {
-    background: #000000;
-    border: 2px solid #00ff66;
-    border-radius: 8px;
-    padding: 15px;
-    box-shadow: 0 0 10px rgba(0, 255, 102, 0.3);
-  }
-  
-  .display-box {
-    color: #00ff66;
-    font-family: monospace;
-    font-size: 1.1rem;
-    min-height: 240px;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    margin: 0;
-  }
-
-  .nav-buttons {
-    margin-top: 15px;
-    display: flex;
-    gap: 10px;
-  }
-</style>
+  <meta charset="UTF-8">
+  <title>EVEN G2 Translator App (Deepgram + DeepL)</title>
+  <style>
+    body {
+      background-color: #111;
+      color: #00FF00;
+      font-family: Arial, sans-serif;
+      display: flex;
+      height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    .glass-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      border-right: 1px solid #333;
+      padding-right: 20px;
+    }
+    .mode-tab-bar {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 12px;
+      width: 576px;
+    }
+    .mode-tab {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #00AA00;
+      color: #00FF00;
+      padding: 6px 2px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    .mode-tab.active {
+      background: #00FF00;
+      color: #000;
+      box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+    }
+    #glass-display {
+      width: 576px;
+      height: 288px;
+      background-color: #000;
+      border: 3px solid #00FF00;
+      border-radius: 8px;
+      box-sizing: border-box;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+    .hud-mode-screen {
+      display: none;
+      height: 100%;
+      flex-direction: column;
+    }
+    .hud-mode-screen.active {
+      display: flex;
+    }
+    .text-scroll-area {
+      flex: 1;
+      overflow-y: auto;
+      margin-top: 4px;
+      padding-right: 4px;
+    }
+    .text-scroll-area::-webkit-scrollbar {
+      width: 6px;
+    }
+    .text-scroll-area::-webkit-scrollbar-thumb {
+      background: #00AA00;
+      border-radius: 3px;
+    }
+    .control-panel {
+      width: 400px;
+      padding-left: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      color: #ccc;
+      font-size: 13px;
+      overflow-y: auto;
+    }
+    .control-panel h2 { color: #00FF00; font-size: 16px; margin: 0 0 5px 0; display: flex; align-items: center; justify-content: space-between; }
+    .version-badge {
+      background: #00FF00;
+      color: #000;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: bold;
+    }
+    input, button {
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 8px; }
+    button:hover { background: #00dd00; color: #000; }
+    .nav-btn {
+      background: #333;
+      border: 1px solid #00FF00;
+      color: #00FF00;
+      padding: 4px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .nav-btn:hover { background: #00FF00; color: #000; }
+    .status { font-size: 11px; color: #888; white-space: pre-wrap; word-break: break-all; }
+  </style>
 </head>
-<body>
+<body tabindex="0">
 
-<div class="container">
-  <h1>リアルタイム文字起こし・翻訳通訳アシスタント V4.3</h1>
+  <div class="glass-container">
+    <div class="mode-tab-bar">
+      <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 自動トリガー</div>
+      <div id="tab2" class="mode-tab" onclick="switchMode(2)">2: PTT (押して送信)</div>
+    </div>
 
-  <div class="control-panel">
-    <div>
-      <label>Deepgram API Key (文字起こし):</label>
-      <input type="password" id="deepgramKey" placeholder="Deepgram Key" />
-    </div>
-    <div>
-      <label>DeepL API Key (翻訳):</label>
-      <input type="password" id="deeplKey" placeholder="DeepL Key (:fx 含む)" />
-    </div>
-    <div>
-      <label>OpenAI API Key (返答ヒント用・任意):</label>
-      <input type="password" id="apiKey" placeholder="sk-..." />
-    </div>
-    <div>
-      <label>無音判定時間 (秒):</label>
-      <input type="number" id="silenceSec" value="1.2" step="0.1" min="0.5" />
-    </div>
-    <div style="grid-column: span 2;">
-      <label>操作:</label>
-      <div style="display:flex; gap:10px;">
-        <button id="startBtn" style="flex:1;">録音開始</button>
-        <button id="stopBtn" disabled style="flex:1; background-color:#dc3545;">録音停止</button>
+    <div id="glass-display">
+      <div id="mode1Screen" class="hud-mode-screen active">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー (↑/↓キーで履歴移動)</div>
+          <div>
+            <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
+            <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
+          </div>
+        </div>
+        <div id="m1-status" style="color:#888; font-size:11px; margin-top:2px;">音声入力待機中...</div>
+        <div class="text-scroll-area">
+          <div id="m1-text" style="color:#fff; font-size:12px; font-weight:bold; white-space:pre-wrap;">-</div>
+        </div>
+      </div>
+
+      <div id="mode2Screen" class="hud-mode-screen">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 (↑/↓キーで履歴移動)</div>
+          <div>
+            <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
+            <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
+          </div>
+        </div>
+        <div id="m2-status" style="color:#888; font-size:11px; margin-top:2px;">ボタンで音声送信</div>
+        <div class="text-scroll-area">
+          <div id="m2-text" style="color:#fff; font-size:12px; font-weight:bold; white-space:pre-wrap;">-</div>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="status" id="statusText">ステータス: 待機中 (V4.3)</div>
+  <div class="control-panel">
+    <h2>
+      <span>G2 音声翻訳＆返答アシスト</span>
+      <span class="version-badge" id="versionBadge">v3.0 (Deepgram/DeepL高速化)</span>
+    </h2>
+    <div>
+      <label>Deepgram API Key (文字起こし):</label>
+      <input type="password" id="deepgramKey" placeholder="Deepgram Key" style="width:100%; box-sizing:border-box;" />
+    </div>
+    <div>
+      <label>DeepL API Key (翻訳):</label>
+      <input type="password" id="deeplKey" placeholder="DeepL Key (:fx 含む)" style="width:100%; box-sizing:border-box;" />
+    </div>
+    <div>
+      <label>OpenAI API Key (返答ヒント用・任意):</label>
+      <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
+    </div>
+    
+    <div>
+      <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">250</span></label>
+      <input type="range" id="noiseThreshold" min="50" max="2000" value="250" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+    </div>
 
-  <!-- G2グラスシミュレータ・アプリ連動用ターゲット枠 -->
-  <div class="g2-container" id="g2Container">
-    <div class="display-box" id="displayBox">ここに会話と翻訳、返答ヒントが表示されます...</div>
+    <div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.6</span>秒</label>
+      <input type="range" id="silenceSec" min="0.3" max="3.0" step="0.1" value="0.6" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※頭欠け防止のため 0.5〜0.7秒 推奨</div>
+    </div>
+
+    <div style="border-top:1px solid #333; margin:5px 0;"></div>
+    <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信（画面2用）</button>
+    <button onclick="clearHistory()" style="background:#cc3333; margin-top:5px;">🗑️ 履歴をクリア</button>
+    
+    <div style="border-top:1px solid #333; margin:5px 0;"></div>
+    <div style="font-weight:bold; color:#00FF00;">【ログ・ステータス】</div>
+    <div id="status" class="status">SDK接続待機中...</div>
   </div>
 
-  <div class="nav-buttons">
-    <button id="prevBtn">＜ 前へ</button>
-    <button id="nextBtn">次へ ＞</button>
-  </div>
-</div>
+  <script type="module">
+    import {
+      waitForEvenAppBridge,
+      TextContainerProperty,
+      CreateStartUpPageContainer,
+      TextContainerUpgrade,
+      OsEventTypeList
+    } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-<script>
-// ==========================================
-// グローバル変数・状態管理
-// ==========================================
-let audioContext = null;
-let mediaStream = null;
-let scriptProcessor = null;
+    const APP_VERSION = "v3.0 (Deepgram/DeepL高速化)";
 
-let isRecording = false;
-let isProcessing = false;
-let isPartialTranscribing = false;
+    let bridge = null;
+    let currentMode = 1;
 
-let activePcmChunks = [];
-let activeTotalBytes = 0;
-let silenceTimer = null;
-let lastPartialBytes = 0;
+    let activePcmChunks = [];
+    let activeTotalBytes = 0;
+    
+    // 話し始めの頭欠けを防ぐためのバッファリング (直近3フレーム保持)
+    let preRingBuffer = [];
+    const MAX_PRE_BUFFER = 3;
 
-let historyList = [];
-let historyIndex = -1;
-let currentActiveIndex = -1;
-let currentMode = 0;
+    let isProcessing = false;
+    let silenceTimer = null;
 
-// Node
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const statusText = document.getElementById('statusText');
-const displayBox = document.getElementById('displayBox');
-const prevBtn = document.getElementById('prevBtn');
-const nextBtn = document.getElementById('nextBtn');
+    let historyList = [];
+    let historyRawEnList = [];
+    let lastProcessedTime = 0;
+    let historyIndex = -1;
 
-// イベント
-startBtn.addEventListener('click', startRecording);
-stopBtn.addEventListener('click', stopRecording);
-prevBtn.addEventListener('click', showPrevHistory);
-nextBtn.addEventListener('click', showNextHistory);
-
-function setStatus(msg) {
-  statusText.innerText = 'ステータス: ' + msg;
-}
-
-function isNoiseOrFiller(text) {
-  if (!text) return true;
-  const clean = text.trim().toLowerCase().replace(/[^a-z]/g, '');
-  const fillers = ['thankyou', 'thanks', 'you', 'mb', 'bye', 'am', 'so'];
-  return clean.length <= 2 || fillers.includes(clean);
-}
-
-// ==========================================
-// G2グラス同期処理（V3.5完全互換）
-// ==========================================
-function updateDisplays() {
-  if (historyList.length === 0) {
-    const defaultMsg = "会話データがありません";
-    displayBox.innerText = defaultMsg;
-    sendToG2Bridge(defaultMsg);
-    return;
-  }
-
-  if (currentActiveIndex !== -1) {
-    historyIndex = currentActiveIndex;
-  } else if (historyIndex === -1 || historyIndex >= historyList.length) {
-    historyIndex = historyList.length - 1;
-  }
-
-  const activeText = historyList[historyIndex];
-  
-  // 1. 画面更新
-  displayBox.innerText = activeText;
-
-  // 2. G2側への送信・同期イベント発火
-  sendToG2Bridge(activeText);
-}
-
-function sendToG2Bridge(text) {
-  // G2シミュレータ/拡張機能用変数の更新
-  window.g2DisplayText = text;
-  window.glassesText = text;
-  
-  // カスタムイベントの発火
-  window.dispatchEvent(new CustomEvent('g2UpdateText', { detail: { text: text } }));
-  window.dispatchEvent(new CustomEvent('glassesUpdate', { detail: { text: text } }));
-
-  // WebSocket接続が存在する場合の転送
-  if (window.g2Socket && window.g2Socket.readyState === 1) {
-    window.g2Socket.send(JSON.stringify({ type: 'render', content: text }));
-  }
-}
-
-// ==========================================
-// WAVヘッダー作成
-// ==========================================
-function createWavBlob(pcmChunks, totalBytes) {
-  const sampleRate = audioContext.sampleRate;
-  const wavBuffer = new ArrayBuffer(44 + totalBytes);
-  const view = new DataView(wavBuffer);
-
-  function writeString(offset, string) {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
+    function getDisplayText() {
+      if (historyList.length === 0) {
+        return currentMode === 1 
+          ? "音声入力待機中...\n（相手の発言を検知すると自動表示されます）" 
+          : "タップ操作で音声送信\n（ボタンを押して会話を開始）";
+      }
+      const item = historyList[historyIndex];
+      const navInfo = `[${historyIndex + 1}/${historyList.length}] -------------------\n`;
+      return navInfo + item;
     }
-  }
 
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + totalBytes, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(36, 'data');
-  view.setUint32(40, totalBytes, true);
+    function normalizePcm(pcmData) {
+      if (!pcmData) return null;
+      if (typeof pcmData === 'string') {
+        const binary = atob(pcmData);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+      }
+      if (pcmData instanceof Uint8Array) return pcmData;
+      if (pcmData instanceof ArrayBuffer) return new Uint8Array(pcmData);
+      if (Array.isArray(pcmData)) return new Uint8Array(pcmData);
+      if (ArrayBuffer.isView(pcmData)) return new Uint8Array(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength);
+      return null;
+    }
 
-  let offset = 44;
-  for (const chunk of pcmChunks) {
-    const uint8 = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-    new Uint8Array(wavBuffer, offset).set(uint8);
-    offset += chunk.byteLength;
-  }
+    function calculateRMS(uint8Array) {
+      if (!uint8Array || uint8Array.length < 2) return 0;
+      const dataView = new DataView(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
+      let sum = 0;
+      const samples = Math.floor(uint8Array.byteLength / 2);
+      for (let i = 0; i < samples; i++) {
+        const sample = dataView.getInt16(i * 2, true);
+        sum += sample * sample;
+      }
+      return Math.sqrt(sum / samples);
+    }
 
-  return new Blob([wavBuffer], { type: 'audio/wav' });
-}
+    function createWavBlob(chunks, dataSize) {
+      const sampleRate = 16000;
+      const numChannels = 1;
+      const bitsPerSample = 16;
+      
+      const buffer = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buffer);
 
-// ==========================================
-// API 1: Deepgram (文字起こし)
-// ==========================================
-async function transcribeAudioWithDeepgram(wavBlob) {
-  const deepgramKey = document.getElementById('deepgramKey').value.trim();
-  if (!deepgramKey) throw new Error("Deepgram API Keyが未設定です");
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + dataSize, true);
+      writeString(view, 8, 'WAVE');
 
-  const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true';
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, numChannels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+      view.setUint16(34, bitsPerSample, true);
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Token ${deepgramKey}`,
-      'Content-Type': 'audio/wav'
-    },
-    body: wavBlob
-  });
+      writeString(view, 36, 'data');
+      view.setUint32(40, dataSize, true);
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.reason || `Deepgram Error (${response.status})`);
-  }
+      let offset = 44;
+      for (const chunk of chunks) {
+        new Uint8Array(buffer, offset, chunk.byteLength).set(chunk);
+        offset += chunk.byteLength;
+      }
 
-  const data = await response.json();
-  return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
-}
+      return new Blob([buffer], { type: 'audio/wav' });
+    }
 
-// ==========================================
-// API 2: DeepL (CORS対応翻訳)
-// ==========================================
-async function translateTextWithDeepL(text) {
-  const deeplKey = document.getElementById('deeplKey').value.trim();
-  if (!deeplKey) return "（DeepL Key未設定のため翻訳省略）";
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
 
-  const isFree = deeplKey.endsWith(':fx');
-  const baseUrl = isFree
-    ? 'https://api-free.deepl.com/v2/translate'
-    : 'https://api.deepl.com/v2/translate';
+    function isNoiseOrFiller(text) {
+      if (!text) return true;
+      const clean = text.trim().toLowerCase().replace(/[^a-z]/g, '');
+      const fillers = ['thankyou', 'thanks', 'you', 'mb', 'bye', 'am', 'so'];
+      return clean.length <= 2 || fillers.includes(clean);
+    }
 
-  // バックアッププロキシを含む呼び出し
-  const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(baseUrl);
+    // Deepgram による超高速文字起こし
+    async function transcribeWithDeepgram(wavBlob) {
+      const deepgramKey = document.getElementById('deepgramKey').value.trim();
+      if (!deepgramKey) throw new Error("Deepgram API Keyを入力してください");
 
-  try {
-    const params = new URLSearchParams();
-    params.append('auth_key', deeplKey);
-    params.append('text', text);
-    params.append('target_lang', 'JA');
+      const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Token ${deepgramKey}`,
+          'Content-Type': 'audio/wav'
+        },
+        body: wavBlob
+      });
 
-    const response = await fetch(proxyUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: params
-    });
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.reason || `Deepgram Error (${response.status})`);
+      }
 
-    if (response.ok) {
       const data = await response.json();
-      return data.translations[0]?.text || '';
+      return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
-  } catch (e) {
-    console.warn("DeepL Error:", e);
-  }
 
-  return "（翻訳取得エラー）";
-}
+    // DeepL による高速翻訳
+    async function translateWithDeepL(text) {
+      const deeplKey = document.getElementById('deeplKey').value.trim();
+      if (!deeplKey) return "（DeepL Key未設定のため翻訳省略）";
 
-// ==========================================
-// API 3: OpenAI (返答ヒント)
-// ==========================================
-async function generateResponseHint(enText) {
-  const openAiKey = document.getElementById('apiKey').value.trim();
-  if (!openAiKey) return "（OpenAI Key未設定のためヒント省略）";
+      const isFree = deeplKey.endsWith(':fx');
+      const baseUrl = isFree
+        ? 'https://api-free.deepl.com/v2/translate'
+        : 'https://api.deepl.com/v2/translate';
 
-  try {
-    const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openAiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        temperature: 0.2,
-        max_tokens: 200,
-        messages: [
-          {
-            role: 'system',
-            content: `あなたはスマートグラス用の通訳・回答アシスタントです。入力された英語に対する【返答ヒント】のみを以下の3行フォーマットで出力してください。\n\n(自然で短めの英語一文)\n(カタカナフリガナ)\n(日本語訳)`
-          },
-          { role: 'user', content: enText }
-        ]
-      })
+      const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(baseUrl);
+
+      try {
+        const params = new URLSearchParams();
+        params.append('auth_key', deeplKey);
+        params.append('text', text);
+        params.append('target_lang', 'JA');
+
+        const response = await fetch(proxyUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          return data.translations[0]?.text || '';
+        }
+      } catch (e) {
+        console.warn("DeepL Translation Error:", e);
+      }
+      return "（翻訳取得エラー）";
+    }
+
+    async function flushAndTranscribe() {
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
+
+      if (isProcessing) return;
+
+      const deepgramKey = document.getElementById('deepgramKey').value.trim();
+      if (!deepgramKey) {
+        setStatus('⚠️ エラー: Deepgram API Keyを入力してください');
+        activePcmChunks = [];
+        activeTotalBytes = 0;
+        return;
+      }
+
+      if (activeTotalBytes < 1600) {
+        setStatus(`データ不足のためスキップ (${activeTotalBytes} bytes)`);
+        return;
+      }
+
+      isProcessing = true;
+      const chunksToProcess = [...activePcmChunks];
+      const bytesToProcess = activeTotalBytes;
+      
+      activePcmChunks = [];
+      activeTotalBytes = 0;
+
+      try {
+        setStatus(`Deepgramへ高速送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
+        const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
+        
+        let newEnText = await transcribeWithDeepgram(wavBlob);
+
+        if (!isNoiseOrFiller(newEnText)) {
+          const now = Date.now();
+          const isContinuation = (now - lastProcessedTime < 8000) && (historyRawEnList.length > 0);
+          
+          let fullEnText = newEnText;
+          if (isContinuation) {
+            const prevEn = historyRawEnList[historyRawEnList.length - 1];
+            fullEnText = `${prevEn} ${newEnText}`;
+            historyRawEnList[historyRawEnList.length - 1] = fullEnText;
+          } else {
+            historyRawEnList.push(fullEnText);
+            if (historyRawEnList.length > 10) historyRawEnList.shift();
+          }
+
+          lastProcessedTime = now;
+
+          setStatus(`DeepLで高速翻訳中...`);
+          const jaTranslation = await translateWithDeepL(fullEnText);
+
+          let currentContent = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
+          
+          if (isContinuation) {
+            historyList[historyList.length - 1] = currentContent;
+            historyIndex = historyList.length - 1;
+          } else {
+            historyList.push(currentContent);
+            if (historyList.length > 10) historyList.shift();
+            historyIndex = historyList.length - 1;
+          }
+
+          await updateDisplays();
+
+          const openAiKey = document.getElementById('apiKey').value.trim();
+          if (!openAiKey) {
+            historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n（OpenAI Key未設定）`;
+            await updateDisplays();
+            setStatus('次を待機中...');
+            return;
+          }
+
+          setStatus(`【返答ヒント】生成中...`);
+
+          const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openAiKey}`
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              temperature: 0.2,
+              max_tokens: 200,
+              stream: true,
+              messages: [
+                {
+                  role: 'system',
+                  content: `あなたはスマートグラス用の通訳・回答アシスタントです。入力された英語に対する【返答ヒント】のみを以下の3行フォーマットで出力してください。
+
+(自然で短めの英語一文)
+(カタカナフリガナ)
+(日本語訳)`
+                },
+                { role: 'user', content: fullEnText }
+              ]
+            })
+          });
+
+          if (!chatResponse.ok) {
+            const errJson = await chatResponse.json().catch(() => ({}));
+            throw new Error(errJson.error?.message || `GPT HTTP ${chatResponse.status}`);
+          }
+
+          const reader = chatResponse.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let hintText = "";
+          let lastRenderTime = Date.now();
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split("\n");
+
+            for (const line of lines) {
+              if (line.startsWith("data: ") && line !== "data: [DONE]") {
+                try {
+                  const json = JSON.parse(line.slice(6));
+                  const token = json.choices[0]?.delta?.content || "";
+                  hintText += token;
+
+                  const nowRender = Date.now();
+                  if (nowRender - lastRenderTime > 80) {
+                    historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
+                    await updateDisplays();
+                    lastRenderTime = nowRender;
+                  }
+                } catch (e) {
+                  // 無視
+                }
+              }
+            }
+          }
+
+          historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
+          await updateDisplays();
+          setStatus('次を待機中...');
+
+        } else {
+          setStatus(`ノイズ除去: "${newEnText}" -> 次を待機中`);
+        }
+      } catch (e) {
+        console.error(e);
+        setStatus('エラー: ' + e.message);
+      } finally {
+        isProcessing = false;
+
+        if (activeTotalBytes > 0) {
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 600;
+          silenceTimer = setTimeout(() => {
+            if (currentMode === 1 && !isProcessing) {
+              flushAndTranscribe();
+            }
+          }, silenceMs);
+        }
+      }
+    }
+
+    function handleAudioData(normalized) {
+      const rms = calculateRMS(normalized);
+      const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 250;
+
+      if (rms >= threshold) {
+        if (activePcmChunks.length === 0 && preRingBuffer.length > 0) {
+          for (const preChunk of preRingBuffer) {
+            activePcmChunks.push(preChunk);
+            activeTotalBytes += preChunk.length;
+          }
+          preRingBuffer = [];
+        }
+
+        activePcmChunks.push(normalized);
+        activeTotalBytes += normalized.length;
+
+        if (currentMode === 1 && !isProcessing) {
+          setStatus(`音声検知中... (${Math.round(activeTotalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
+
+          if (silenceTimer) clearTimeout(silenceTimer);
+          
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 600;
+          silenceTimer = setTimeout(() => {
+            if (currentMode === 1 && !isProcessing) {
+              flushAndTranscribe();
+            }
+          }, silenceMs);
+        }
+      } else {
+        if (activePcmChunks.length === 0) {
+          preRingBuffer.push(normalized);
+          if (preRingBuffer.length > MAX_PRE_BUFFER) {
+            preRingBuffer.shift();
+          }
+        }
+
+        if (currentMode === 1 && activeTotalBytes > 0 && !isProcessing) {
+          setStatus(`無音判定中... (${Math.round(activeTotalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
+        }
+      }
+    }
+
+    async function updateDisplays() {
+      const displayText = getDisplayText();
+      document.getElementById('m1-text').innerText = displayText;
+      document.getElementById('m2-text').innerText = displayText;
+      await sendToG2Display(displayText);
+    }
+
+    window.navigateHistory = async function(direction) {
+      if (historyList.length === 0) return;
+      if (direction === 'up' && historyIndex > 0) {
+        historyIndex--;
+        await updateDisplays();
+      } else if (direction === 'down' && historyIndex < historyList.length - 1) {
+        historyIndex++;
+        await updateDisplays();
+      }
+    };
+
+    window.clearHistory = async function() {
+      historyList = [];
+      historyRawEnList = [];
+      historyIndex = -1;
+      activePcmChunks = [];
+      activeTotalBytes = 0;
+      preRingBuffer = [];
+      lastProcessedTime = 0;
+      await updateDisplays();
+      setStatus('履歴をクリアしました');
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        window.navigateHistory('up');
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        window.navigateHistory('down');
+      }
     });
 
-    if (chatResponse.ok) {
-      const chatData = await chatResponse.json();
-      return chatData.choices[0]?.message?.content?.trim() || "（ヒント生成失敗）";
-    }
-  } catch (e) {
-    console.warn("GPTヒント生成エラー:", e);
-  }
-  return "（ヒント生成エラー）";
-}
+    async function initG2() {
+      try {
+        setStatus(`G2ブリッジ接続中... [${APP_VERSION}]`);
+        bridge = await waitForEvenAppBridge();
+        
+        const mainText = new TextContainerProperty({
+          xPosition: 0,
+          yPosition: 0,
+          width: 576,
+          height: 288,
+          borderWidth: 0,
+          borderColor: 5,
+          paddingLength: 4,
+          containerID: 1,
+          containerName: 'hud_main',
+          content: getDisplayText(),
+          isEventCapture: 1,
+        });
 
-// ==========================================
-// 録音 & リアルタイム音声処理
-// ==========================================
-async function startRecording() {
-  const deepgramKey = document.getElementById('deepgramKey').value.trim();
-  if (!deepgramKey) {
-    alert("録音を開始するにはDeepgram API Keyが必要です。");
-    return;
-  }
+        await bridge.createStartUpPageContainer(
+          new CreateStartUpPageContainer({
+            containerTotalNum: 1,
+            textObject: [mainText],
+          })
+        );
 
-  try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    
-    const source = audioContext.createMediaStreamSource(mediaStream);
-    scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+        await bridge.audioControl(true);
+        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON\nAPI Keyを入力して発言してください`);
 
-    scriptProcessor.onaudioprocess = processAudio;
-    source.connect(scriptProcessor);
-    scriptProcessor.connect(audioContext.destination);
+        bridge.onEvenHubEvent(async event => {
+          const rawPcm = event.audioEvent?.audioPcm;
+          if (rawPcm) {
+            const normalized = normalizePcm(rawPcm);
+            if (normalized && normalized.length > 0) {
+              handleAudioData(normalized);
+            }
+          }
 
-    isRecording = true;
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-    setStatus("録音中... 発話待機中");
-  } catch (e) {
-    alert("マイクの起動に失敗しました: " + e.message);
-  }
-}
+          const sysType = event.sysEvent?.eventType;
+          const textType = event.textEvent?.eventType;
 
-function stopRecording() {
-  isRecording = false;
-  if (scriptProcessor) scriptProcessor.disconnect();
-  if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
-  if (audioContext) audioContext.close();
+          if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
+            if (currentMode === 2) {
+              flushAndTranscribe();
+            }
+          }
 
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  setStatus("停止中");
-}
+          const evt = sysType || textType;
+          if (evt === OsEventTypeList.UP_EVENT || evt === OsEventTypeList.SCROLL_UP_EVENT || evt === OsEventTypeList.FLICK_UP_EVENT) {
+            window.navigateHistory('up');
+          }
+          if (evt === OsEventTypeList.DOWN_EVENT || evt === OsEventTypeList.SCROLL_DOWN_EVENT || evt === OsEventTypeList.FLICK_DOWN_EVENT) {
+            window.navigateHistory('down');
+          }
+        });
 
-function processAudio(e) {
-  if (!isRecording) return;
-
-  const inputData = e.inputBuffer.getChannelData(0);
-  
-  let sum = 0;
-  for (let i = 0; i < inputData.length; i++) {
-    sum += inputData[i] * inputData[i];
-  }
-  const rms = Math.sqrt(sum / inputData.length);
-  const threshold = 0.02;
-
-  const pcm16 = new Int16Array(inputData.length);
-  for (let i = 0; i < inputData.length; i++) {
-    const s = Math.max(-1, Math.min(1, inputData[i]));
-    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-  }
-
-  if (rms > threshold) {
-    activePcmChunks.push(pcm16);
-    activeTotalBytes += pcm16.byteLength;
-
-    if (currentMode === 0) {
-      currentMode = 1;
-      setStatus("音声検知中 (発話中)...");
-    }
-
-    if (silenceTimer) {
-      clearTimeout(silenceTimer);
-      silenceTimer = null;
-    }
-
-    if (activeTotalBytes - lastPartialBytes > 32000 && !isPartialTranscribing) {
-      requestPartialTranscribe();
-    }
-  } else {
-    if (currentMode === 1) {
-      activePcmChunks.push(pcm16);
-      activeTotalBytes += pcm16.byteLength;
-
-      if (!silenceTimer) {
-        const silenceMs = Math.max(500, parseFloat(document.getElementById('silenceSec').value) * 1000);
-        silenceTimer = setTimeout(() => {
-          currentMode = 0;
-          flushAndTranscribe();
-        }, silenceMs);
+      } catch (e) {
+        setStatus("SDK接続エラー: " + e.message);
       }
     }
-  }
-}
 
-async function requestPartialTranscribe() {
-  if (isPartialTranscribing || activeTotalBytes < 16000) return;
+    function setStatus(msg) {
+      document.getElementById('status').innerText = msg;
+    }
 
-  isPartialTranscribing = true;
-  const snapshotChunks = [...activePcmChunks];
-  const snapshotBytes = activeTotalBytes;
-  lastPartialBytes = snapshotBytes;
-
-  try {
-    const wavBlob = createWavBlob(snapshotChunks, snapshotBytes);
-    const partialText = await transcribeAudioWithDeepgram(wavBlob);
-
-    if (partialText && !isNoiseOrFiller(partialText)) {
-      const content = `【相手 (リアルタイム入力中...)】\n${partialText}...\n-------------------\n【返答ヒント】\n（発言終了後に生成されます）`;
-      
-      if (currentActiveIndex === -1) {
-        historyList.push(content);
-        if (historyList.length > 10) historyList.shift();
-        currentActiveIndex = historyList.length - 1;
-      } else {
-        historyList[currentActiveIndex] = content;
+    async function sendToG2Display(text) {
+      if (!bridge) return;
+      try {
+        await bridge.textContainerUpgrade(
+          new TextContainerUpgrade({
+            containerID: 1,
+            containerName: 'hud_main',
+            content: text,
+          })
+        );
+      } catch (e) {
+        console.error("Display update failed:", e);
       }
+    }
+
+    function updateUIOnly(mode) {
+      document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+      const activeTab = document.getElementById('tab' + mode);
+      if (activeTab) activeTab.classList.add('active');
+
+      document.querySelectorAll('.hud-mode-screen').forEach(s => s.classList.remove('active'));
+      const activeScreen = document.getElementById('mode' + mode + 'Screen');
+      if (activeScreen) activeScreen.classList.add('active');
+    }
+
+    window.switchMode = function(mode) {
+      currentMode = mode;
+      activePcmChunks = [];
+      activeTotalBytes = 0;
+      preRingBuffer = [];
+      isProcessing = false;
+      if (silenceTimer) clearTimeout(silenceTimer);
+      updateUIOnly(currentMode);
       updateDisplays();
-      setStatus(`リアルタイム認識中: "${partialText}"`);
-    }
-  } catch(e) {
-    console.warn("部分認識スルー:", e);
-  } finally {
-    isPartialTranscribing = false;
-  }
-}
+    };
 
-async function flushAndTranscribe() {
-  if (silenceTimer) {
-    clearTimeout(silenceTimer);
-    silenceTimer = null;
-  }
-
-  if (isProcessing) return;
-
-  if (activeTotalBytes < 3200) {
-    activePcmChunks = [];
-    activeTotalBytes = 0;
-    currentActiveIndex = -1;
-    setStatus("待機中 (短い音声をスキップ)");
-    return;
-  }
-
-  isProcessing = true;
-  const chunksToProcess = [...activePcmChunks];
-  const bytesToProcess = activeTotalBytes;
-
-  activePcmChunks = [];
-  activeTotalBytes = 0;
-  lastPartialBytes = 0;
-  const workingIndex = currentActiveIndex;
-  currentActiveIndex = -1;
-
-  try {
-    setStatus(`全音声確定・文字起こし中...`);
-    const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
-    
-    // 1. Deepgram
-    const newEnText = await transcribeAudioWithDeepgram(wavBlob);
-
-    if (!isNoiseOrFiller(newEnText)) {
-      setStatus(`翻訳＆返答ヒント生成中...`);
-      
-      // 2. DeepL
-      const jaTranslation = await translateTextWithDeepL(newEnText);
-
-      let currentContent = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
-      
-      let targetItemIndex = workingIndex;
-      if (targetItemIndex >= 0 && targetItemIndex < historyList.length) {
-        historyList[targetItemIndex] = currentContent;
-      } else {
-        historyList.push(currentContent);
-        if (historyList.length > 10) historyList.shift();
-        targetItemIndex = historyList.length - 1;
+    window.forceSendPTT = function() {
+      if (currentMode !== 2) {
+        switchMode(2);
       }
+      flushAndTranscribe();
+    };
 
-      updateDisplays();
-
-      // 3. OpenAI GPT
-      const hintText = await generateResponseHint(newEnText);
-
-      // 最終更新
-      historyList[targetItemIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
-      updateDisplays();
-      setStatus(`次を待機中... (表示: [${historyIndex + 1}/${historyList.length}])`);
-
-    } else {
-      if (workingIndex >= 0 && workingIndex < historyList.length) {
-        historyList.splice(workingIndex, 1);
-        updateDisplays();
-      }
-      setStatus(`ノイズ除去: "${newEnText}" -> 待機中`);
-    }
-  } catch (e) {
-    console.error(e);
-    setStatus('エラー: ' + e.message);
-  } finally {
-    isProcessing = false;
-  }
-}
-
-function showPrevHistory() {
-  if (historyList.length === 0) return;
-  if (historyIndex > 0) {
-    historyIndex--;
-    updateDisplays();
-    setStatus(`過去ログ表示中 [${historyIndex + 1}/${historyList.length}]`);
-  }
-}
-
-function showNextHistory() {
-  if (historyList.length === 0) return;
-  if (historyIndex < historyList.length - 1) {
-    historyIndex++;
-    updateDisplays();
-    setStatus(`過去ログ表示中 [${historyIndex + 1}/${historyList.length}]`);
-  }
-}
-</script>
-
+    initG2();
+  </script>
 </body>
 </html>
