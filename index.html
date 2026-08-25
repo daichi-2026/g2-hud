@@ -13,6 +13,7 @@
       margin: 0;
       padding: 20px;
       box-sizing: border-box;
+      user-select: none;
     }
     .glass-container {
       flex: 1;
@@ -69,16 +70,8 @@
     }
     .text-scroll-area {
       flex: 1;
-      overflow-y: auto;
+      overflow: hidden; /* 縦スクロールによるナビゲーション阻害を防ぐため隠す */
       margin-top: 4px;
-      padding-right: 4px;
-    }
-    .text-scroll-area::-webkit-scrollbar {
-      width: 6px;
-    }
-    .text-scroll-area::-webkit-scrollbar-thumb {
-      background: #00AA00;
-      border-radius: 3px;
     }
     .control-panel {
       width: 400px;
@@ -113,15 +106,16 @@
       background: #333;
       border: 1px solid #00FF00;
       color: #00FF00;
-      padding: 4px 8px;
-      font-size: 11px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: bold;
       cursor: pointer;
     }
-    .nav-btn:hover { background: #00FF00; color: #000; }
+    .nav-btn:active { background: #00FF00; color: #000; }
     .status { font-size: 11px; color: #888; white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
-<body tabindex="0">
+<body>
 
   <div class="glass-container">
     <div class="mode-tab-bar">
@@ -132,10 +126,10 @@
     <div id="glass-display">
       <div id="mode1Screen" class="hud-mode-screen active">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー (↑/↓キーで履歴移動)</div>
+          <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー (↑/↓キーまたはボタンでページ切替)</div>
           <div>
-            <button type="button" class="nav-btn" onclick="window.navigateHistory('up')">▲ 前へ</button>
-            <button type="button" class="nav-btn" onclick="window.navigateHistory('down')">▼ 次へ</button>
+            <button type="button" class="nav-btn" id="m1-prev-btn">▲ 前へ</button>
+            <button type="button" class="nav-btn" id="m1-next-btn">▼ 次へ</button>
           </div>
         </div>
         <div id="m1-status" style="color:#888; font-size:11px; margin-top:2px;">音声入力待機中...</div>
@@ -146,10 +140,10 @@
 
       <div id="mode2Screen" class="hud-mode-screen">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 (↑/↓キーで履歴移動)</div>
+          <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 (↑/↓キーまたはボタンでページ切替)</div>
           <div>
-            <button type="button" class="nav-btn" onclick="window.navigateHistory('up')">▲ 前へ</button>
-            <button type="button" class="nav-btn" onclick="window.navigateHistory('down')">▼ 次へ</button>
+            <button type="button" class="nav-btn" id="m2-prev-btn">▲ 前へ</button>
+            <button type="button" class="nav-btn" id="m2-next-btn">▼ 次へ</button>
           </div>
         </div>
         <div id="m2-status" style="color:#888; font-size:11px; margin-top:2px;">ボタンで音声送信</div>
@@ -163,7 +157,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v2.9</span>
+      <span class="version-badge" id="versionBadge">v3.0</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -199,7 +193,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v2.9 (ナビ修正版)";
+    const APP_VERSION = "v3.0 (ページ移動確定版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -536,24 +530,34 @@
       await sendToG2Display(displayText);
     }
 
-    // ★ナビゲーション関数をグローバルに登録し、引数の文字列判定を確実に処理
-    window.navigateHistory = async function(direction) {
+    // ★ページ切り替え処理を完全物理独立化
+    function prevPage() {
       if (historyList.length === 0) return;
-      
-      if (direction === 'up') {
-        if (historyIndex > 0) {
-          historyIndex--;
-          await updateDisplays();
-          setStatus(`表示変更: [${historyIndex + 1}/${historyList.length}]`);
-        }
-      } else if (direction === 'down') {
-        if (historyIndex < historyList.length - 1) {
-          historyIndex++;
-          await updateDisplays();
-          setStatus(`表示変更: [${historyIndex + 1}/${historyList.length}]`);
-        }
+      if (historyIndex > 0) {
+        historyIndex--;
+        updateDisplays();
+        setStatus(`ページ移動: [${historyIndex + 1}/${historyList.length}]`);
+      } else {
+        setStatus(`これ以上前の履歴はありません [1/${historyList.length}]`);
       }
-    };
+    }
+
+    function nextPage() {
+      if (historyList.length === 0) return;
+      if (historyIndex < historyList.length - 1) {
+        historyIndex++;
+        updateDisplays();
+        setStatus(`ページ移動: [${historyIndex + 1}/${historyList.length}]`);
+      } else {
+        setStatus(`最新の履歴を表示中です [${historyList.length}/${historyList.length}]`);
+      }
+    }
+
+    // ボタン直接バインド（画面1 & 画面2 の前へ/次へボタン）
+    document.getElementById('m1-prev-btn').addEventListener('click', (e) => { e.preventDefault(); prevPage(); });
+    document.getElementById('m1-next-btn').addEventListener('click', (e) => { e.preventDefault(); nextPage(); });
+    document.getElementById('m2-prev-btn').addEventListener('click', (e) => { e.preventDefault(); prevPage(); });
+    document.getElementById('m2-next-btn').addEventListener('click', (e) => { e.preventDefault(); nextPage(); });
 
     window.clearHistory = async function() {
       historyList = [];
@@ -565,14 +569,14 @@
       setStatus('履歴をクリアしました');
     };
 
-    // グローバルキーボードイベントのバインド
+    // キーボード操作対応 (↑: 前へ / ↓: 次へ)
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        window.navigateHistory('up');
+        prevPage();
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
-        window.navigateHistory('down');
+        nextPage();
       }
     });
 
@@ -625,12 +629,12 @@
 
           const evt = sysType || textType;
 
-          // ★グラス操作イベントの割り当て（フリック向上/上キー -> 前へ、フリック向下/下キー -> 次へ）
+          // スマートグラスのタッチ操作割り当て
           if (evt === OsEventTypeList.UP_EVENT || evt === OsEventTypeList.SCROLL_UP_EVENT || evt === OsEventTypeList.FLICK_UP_EVENT) {
-            window.navigateHistory('up');
+            prevPage();
           }
           if (evt === OsEventTypeList.DOWN_EVENT || evt === OsEventTypeList.SCROLL_DOWN_EVENT || evt === OsEventTypeList.FLICK_DOWN_EVENT) {
-            window.navigateHistory('down');
+            nextPage();
           }
         });
 
