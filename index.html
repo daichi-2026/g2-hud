@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v2.7</span>
+      <span class="version-badge" id="versionBadge">v2.8 (ヒント保持版)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -175,7 +175,6 @@
       <input type="range" id="noiseThreshold" min="50" max="2000" value="250" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
     </div>
 
-    <!-- ★スライダーの設定：最小 0.05秒、刻み 0.05秒、初期値 0.05秒 に変更 -->
     <div>
       <label>無音判定タイマー (秒): <span id="silenceSecVal">0.05</span>秒</label>
       <input type="range" id="silenceSec" min="0.05" max="3.00" step="0.05" value="0.05" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = parseFloat(this.value).toFixed(2)" />
@@ -200,7 +199,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v2.7";
+    const APP_VERSION = "v2.8 (ヒント保持版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -215,8 +214,6 @@
     let silenceTimer = null;
 
     let historyList = [];
-    let historyRawEnList = [];
-    let lastProcessedTime = 0;
     let historyIndex = -1;
 
     function getDisplayText() {
@@ -372,21 +369,6 @@
         let newEnText = data.text ? data.text.trim() : '';
 
         if (!isNoiseOrFiller(newEnText)) {
-          const now = Date.now();
-          const isContinuation = (now - lastProcessedTime < 8000) && (historyRawEnList.length > 0);
-          
-          let fullEnText = newEnText;
-          if (isContinuation) {
-            const prevEn = historyRawEnList[historyRawEnList.length - 1];
-            fullEnText = `${prevEn} ${newEnText}`;
-            historyRawEnList[historyRawEnList.length - 1] = fullEnText;
-          } else {
-            historyRawEnList.push(fullEnText);
-            if (historyRawEnList.length > 10) historyRawEnList.shift();
-          }
-
-          lastProcessedTime = now;
-
           setStatus(`相手発言を即時翻訳中...`);
           let jaTranslation = "";
           try {
@@ -398,7 +380,7 @@
                 temperature: 0.1,
                 messages: [
                   { role: 'system', content: '入力された英語を自然で簡潔な日本語に直訳してください。翻訳文のみ出力すること。' },
-                  { role: 'user', content: fullEnText }
+                  { role: 'user', content: newEnText }
                 ]
               })
             });
@@ -410,16 +392,12 @@
             console.warn("翻訳エラー:", e);
           }
 
-          let currentContent = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
+          // ★過去の返答ヒントは削除・上書きせず、常に「新しい履歴アイテム」として追加する
+          let currentContent = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
           
-          if (isContinuation) {
-            historyList[historyList.length - 1] = currentContent;
-            historyIndex = historyList.length - 1;
-          } else {
-            historyList.push(currentContent);
-            if (historyList.length > 10) historyList.shift();
-            historyIndex = historyList.length - 1;
-          }
+          historyList.push(currentContent);
+          if (historyList.length > 10) historyList.shift();
+          historyIndex = historyList.length - 1;
 
           await updateDisplays();
           setStatus(`【返答ヒント】生成中...`);
@@ -444,7 +422,7 @@
 (カタカナフリガナ)
 (日本語訳)`
                 },
-                { role: 'user', content: fullEnText }
+                { role: 'user', content: newEnText }
               ]
             })
           });
@@ -475,7 +453,7 @@
 
                   const nowRender = Date.now();
                   if (nowRender - lastRenderTime > 80) {
-                    historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
+                    historyList[historyIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
                     await updateDisplays();
                     lastRenderTime = nowRender;
                   }
@@ -486,7 +464,7 @@
             }
           }
 
-          historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
+          historyList[historyIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
           await updateDisplays();
           setStatus('次を待機中...');
 
@@ -531,7 +509,6 @@
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          // ★ここでスライダーの値（最小50ms = 0.05秒）をダイレクトに読み込み
           const silenceMs = Math.max(50, parseFloat(document.getElementById('silenceSec').value) * 1000);
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
@@ -573,12 +550,10 @@
 
     window.clearHistory = async function() {
       historyList = [];
-      historyRawEnList = [];
       historyIndex = -1;
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
-      lastProcessedTime = 0;
       await updateDisplays();
       setStatus('履歴をクリアしました');
     };
