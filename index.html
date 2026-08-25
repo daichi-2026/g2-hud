@@ -70,7 +70,7 @@
     }
     .text-scroll-area {
       flex: 1;
-      overflow: hidden; /* 縦スクロールによるナビゲーション阻害を防ぐため隠す */
+      overflow: hidden;
       margin-top: 4px;
     }
     .control-panel {
@@ -157,7 +157,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.0</span>
+      <span class="version-badge" id="versionBadge">v3.2</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -193,7 +193,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.0 (ページ移動確定版)";
+    const APP_VERSION = "v3.2 (手動固定表示版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -208,7 +208,7 @@
     let silenceTimer = null;
 
     let historyList = [];
-    let historyIndex = -1;
+    let historyIndex = 0; // 初期状態から1ページ目を保持
 
     function getDisplayText() {
       if (historyList.length === 0) {
@@ -216,6 +216,11 @@
           ? "音声入力待機中...\n（相手の発言を検知すると自動表示されます）" 
           : "タップ操作で音声送信\n（ボタンを押して会話を開始）";
       }
+      
+      // インデックスの安全チェック（範囲内に強制修復）
+      if (historyIndex < 0) historyIndex = 0;
+      if (historyIndex >= historyList.length) historyIndex = historyList.length - 1;
+
       const item = historyList[historyIndex];
       const navInfo = `[${historyIndex + 1}/${historyList.length}] -------------------\n`;
       return navInfo + item;
@@ -390,10 +395,12 @@
           
           historyList.push(currentContent);
           if (historyList.length > 10) historyList.shift();
-          historyIndex = historyList.length - 1;
 
+          const targetItemIndex = historyList.length - 1;
+
+          // ★ historyIndex の自動追従・上書きを完全に排除（手動操作で選ばれたインデックス位置を100%維持）
           await updateDisplays();
-          setStatus(`【返答ヒント】生成中...`);
+          setStatus(`新着履歴追加 [${historyList.length}件] - 【返答ヒント】生成中...`);
 
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -446,7 +453,7 @@
 
                   const nowRender = Date.now();
                   if (nowRender - lastRenderTime > 80) {
-                    historyList[historyIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
+                    historyList[targetItemIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
                     await updateDisplays();
                     lastRenderTime = nowRender;
                   }
@@ -457,7 +464,7 @@
             }
           }
 
-          historyList[historyIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
+          historyList[targetItemIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
           await updateDisplays();
           setStatus('次を待機中...');
 
@@ -530,7 +537,6 @@
       await sendToG2Display(displayText);
     }
 
-    // ★ページ切り替え処理を完全物理独立化
     function prevPage() {
       if (historyList.length === 0) return;
       if (historyIndex > 0) {
@@ -553,7 +559,7 @@
       }
     }
 
-    // ボタン直接バインド（画面1 & 画面2 の前へ/次へボタン）
+    // ボタン直接バインド
     document.getElementById('m1-prev-btn').addEventListener('click', (e) => { e.preventDefault(); prevPage(); });
     document.getElementById('m1-next-btn').addEventListener('click', (e) => { e.preventDefault(); nextPage(); });
     document.getElementById('m2-prev-btn').addEventListener('click', (e) => { e.preventDefault(); prevPage(); });
@@ -561,7 +567,7 @@
 
     window.clearHistory = async function() {
       historyList = [];
-      historyIndex = -1;
+      historyIndex = 0;
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
@@ -629,7 +635,7 @@
 
           const evt = sysType || textType;
 
-          // スマートグラスのタッチ操作割り当て
+          // スマートグラスのタッチ・フリック操作割り当て
           if (evt === OsEventTypeList.UP_EVENT || evt === OsEventTypeList.SCROLL_UP_EVENT || evt === OsEventTypeList.FLICK_UP_EVENT) {
             prevPage();
           }
