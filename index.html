@@ -157,7 +157,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.2</span>
+      <span class="version-badge" id="versionBadge">v3.3</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -193,7 +193,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.2 (手動固定表示版)";
+    const APP_VERSION = "v3.3 (1ページ目完全固定修正版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -208,7 +208,7 @@
     let silenceTimer = null;
 
     let historyList = [];
-    let historyIndex = 0; // 初期状態から1ページ目を保持
+    let historyIndex = 0; // 常に0（1ページ目）を指す初期設定
 
     function getDisplayText() {
       if (historyList.length === 0) {
@@ -217,7 +217,7 @@
           : "タップ操作で音声送信\n（ボタンを押して会話を開始）";
       }
       
-      // インデックスの安全チェック（範囲内に強制修復）
+      // 厳格な境界チェック（手動で選択されているインデックスを保護）
       if (historyIndex < 0) historyIndex = 0;
       if (historyIndex >= historyList.length) historyIndex = historyList.length - 1;
 
@@ -396,11 +396,12 @@
           historyList.push(currentContent);
           if (historyList.length > 10) historyList.shift();
 
+          // 新規追加された要素のインデックス
           const targetItemIndex = historyList.length - 1;
 
-          // ★ historyIndex の自動追従・上書きを完全に排除（手動操作で選ばれたインデックス位置を100%維持）
+          // ★重要: historyIndexを書き換えず手動選択された画面を完全固定
           await updateDisplays();
-          setStatus(`新着履歴追加 [${historyList.length}件] - 【返答ヒント】生成中...`);
+          setStatus(`新着履歴追加 [${historyList.length}件] (現在表示: [${historyIndex + 1}/${historyList.length}])`);
 
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -466,7 +467,7 @@
 
           historyList[targetItemIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
           await updateDisplays();
-          setStatus('次を待機中...');
+          setStatus(`次を待機中... (現在表示: [${historyIndex + 1}/${historyList.length}])`);
 
         } else {
           setStatus(`ノイズ除去: "${newEnText}" -> 次を待機中`);
@@ -544,7 +545,7 @@
         updateDisplays();
         setStatus(`ページ移動: [${historyIndex + 1}/${historyList.length}]`);
       } else {
-        setStatus(`これ以上前の履歴はありません [1/${historyList.length}]`);
+        setStatus(`最初の履歴を表示中です [1/${historyList.length}]`);
       }
     }
 
