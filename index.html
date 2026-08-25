@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.3 (Workers CORS・高速化対応)</span>
+      <span class="version-badge" id="versionBadge">v3.4 (爆速・高精度化版)</span>
     </h2>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -179,14 +179,14 @@
     </div>
     
     <div>
-      <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">250</span></label>
-      <input type="range" id="noiseThreshold" min="50" max="2000" value="250" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+      <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">200</span></label>
+      <input type="range" id="noiseThreshold" min="50" max="2000" value="200" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
     </div>
 
     <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.6</span>秒</label>
-      <input type="range" id="silenceSec" min="0.3" max="3.0" step="0.1" value="0.6" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※頭欠け防止のため 0.5〜0.7秒 推奨</div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.3</span>秒</label>
+      <input type="range" id="silenceSec" min="0.2" max="2.0" step="0.1" value="0.3" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※最速応答のため 0.3秒 に変更</div>
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -207,7 +207,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.3 (Workers CORS・高速化対応)";
+    const APP_VERSION = "v3.4 (爆速・高精度化版)";
     const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev/";
 
     let bridge = null;
@@ -217,14 +217,12 @@
     let activeTotalBytes = 0;
     
     let preRingBuffer = [];
-    const MAX_PRE_BUFFER = 3;
+    const MAX_PRE_BUFFER = 5; // 頭欠け防止のためバッファ拡張
 
     let isProcessing = false;
     let silenceTimer = null;
 
     let historyList = [];
-    let historyRawEnList = [];
-    let lastProcessedTime = 0;
     let historyIndex = -1;
 
     function getDisplayText() {
@@ -309,15 +307,16 @@
       if (!text) return true;
       const clean = text.trim().toLowerCase().replace(/[^a-z]/g, '');
       const fillers = ['thankyou', 'thanks', 'you', 'mb', 'bye', 'am', 'so'];
-      return clean.length <= 2 || fillers.includes(clean);
+      return clean.length <= 1 || fillers.includes(clean);
     }
 
-    // Deepgram 超高速文字起こし
+    // Deepgram 超高速・高精度パラメータ適用
     async function transcribeWithDeepgram(wavBlob) {
       const deepgramKey = document.getElementById('deepgramKey').value.trim();
       if (!deepgramKey) throw new Error("Deepgram API Keyを入力してください");
 
-      const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true';
+      // 高精度化のためのパラメータを追加 (smart_format, model=nova-2)
+      const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true';
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -336,13 +335,12 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // DeepL 翻訳 (専用 Cloudflare Worker 経由 + OpenAI フォールバック)
+    // DeepL 翻訳 (Cloudflare Worker 経由)
     async function translateText(text) {
       const deeplKey = document.getElementById('deeplKey').value.trim();
       
       if (deeplKey) {
         try {
-          // 自前 Cloudflare Worker 経由でリクエスト (CORS完全回避 & 超高速通信)
           const response = await fetch(WORKER_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -364,7 +362,6 @@
         }
       }
 
-      // DeepL失敗時 または DeepL Key未入力時: OpenAIによる自動バックアップ翻訳
       const openAiKey = document.getElementById('apiKey').value.trim();
       if (openAiKey) {
         try {
@@ -378,7 +375,7 @@
               model: 'gpt-4o-mini',
               temperature: 0.1,
               messages: [
-                { role: 'system', content: '入力された英語を自然で短い日本語に翻訳し、翻訳文のみを出力してください。' },
+                { role: 'system', content: '入力された英語を自然な日本語に翻訳し、翻訳文のみを出力してください。' },
                 { role: 'user', content: text }
               ]
             })
@@ -392,7 +389,7 @@
         }
       }
 
-      return "（翻訳取得エラー - APIキーまたは通信を確認してください）";
+      return "（翻訳取得エラー）";
     }
 
     async function flushAndTranscribe() {
@@ -411,8 +408,9 @@
         return;
       }
 
-      if (activeTotalBytes < 1600) {
-        setStatus(`データ不足のためスキップ (${activeTotalBytes} bytes)`);
+      if (activeTotalBytes < 1200) {
+        activePcmChunks = [];
+        activeTotalBytes = 0;
         return;
       }
 
@@ -424,53 +422,32 @@
       activeTotalBytes = 0;
 
       try {
-        setStatus(`Deepgramへ高速送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
+        setStatus(`解析中...`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
         
-        let newEnText = await transcribeWithDeepgram(wavBlob);
+        let enText = await transcribeWithDeepgram(wavBlob);
 
-        if (!isNoiseOrFiller(newEnText)) {
-          const now = Date.now();
-          const isContinuation = (now - lastProcessedTime < 8000) && (historyRawEnList.length > 0);
+        if (!isNoiseOrFiller(enText)) {
+          setStatus(`翻訳中...`);
+          const jaTranslation = await translateText(enText);
+
+          let currentContent = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
           
-          let fullEnText = newEnText;
-          if (isContinuation) {
-            const prevEn = historyRawEnList[historyRawEnList.length - 1];
-            fullEnText = `${prevEn} ${newEnText}`;
-            historyRawEnList[historyRawEnList.length - 1] = fullEnText;
-          } else {
-            historyRawEnList.push(fullEnText);
-            if (historyRawEnList.length > 10) historyRawEnList.shift();
-          }
-
-          lastProcessedTime = now;
-
-          setStatus(`翻訳処理中 (Worker)...`);
-          const jaTranslation = await translateText(fullEnText);
-
-          let currentContent = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
-          
-          if (isContinuation) {
-            historyList[historyList.length - 1] = currentContent;
-            historyIndex = historyList.length - 1;
-          } else {
-            historyList.push(currentContent);
-            if (historyList.length > 10) historyList.shift();
-            historyIndex = historyList.length - 1;
-          }
+          historyList.push(currentContent);
+          if (historyList.length > 10) historyList.shift();
+          historyIndex = historyList.length - 1;
 
           await updateDisplays();
 
           const openAiKey = document.getElementById('apiKey').value.trim();
           if (!openAiKey) {
-            historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n（OpenAI Key未設定）`;
+            historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n（OpenAI Key未設定）`;
             await updateDisplays();
-            setStatus('次を待機中...');
+            setStatus('待機中');
             return;
           }
 
-          setStatus(`【返答ヒント】生成中...`);
-
+          // OpenAI 返答ヒント作成 (超高速ストリーミング)
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -480,25 +457,23 @@
             body: JSON.stringify({
               model: 'gpt-4o-mini',
               temperature: 0.2,
-              max_tokens: 200,
+              max_tokens: 150,
               stream: true,
               messages: [
                 {
                   role: 'system',
-                  content: `あなたはスマートグラス用の通訳・回答アシスタントです。入力された英語に対する【返答ヒント】のみを以下の3行フォーマットで出力してください。
-
-(自然で短めの英語一文)
+                  content: `英語の発言に対し、短く返答するヒントを3行で出力してください。
+(短い英語)
 (カタカナフリガナ)
 (日本語訳)`
                 },
-                { role: 'user', content: fullEnText }
+                { role: 'user', content: enText }
               ]
             })
           });
 
           if (!chatResponse.ok) {
-            const errJson = await chatResponse.json().catch(() => ({}));
-            throw new Error(errJson.error?.message || `GPT HTTP ${chatResponse.status}`);
+            throw new Error(`GPT HTTP ${chatResponse.status}`);
           }
 
           const reader = chatResponse.body.getReader();
@@ -521,45 +496,34 @@
                   hintText += token;
 
                   const nowRender = Date.now();
-                  if (nowRender - lastRenderTime > 80) {
-                    historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
+                  if (nowRender - lastRenderTime > 60) {
+                    historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
                     await updateDisplays();
                     lastRenderTime = nowRender;
                   }
-                } catch (e) {
-                  // 無視
-                }
+                } catch (e) {}
               }
             }
           }
 
-          historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
+          historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
           await updateDisplays();
-          setStatus('次を待機中...');
+          setStatus('待機中');
 
         } else {
-          setStatus(`ノイズ除去: "${newEnText}" -> 次を待機中`);
+          setStatus(`待機中`);
         }
       } catch (e) {
         console.error(e);
         setStatus('エラー: ' + e.message);
       } finally {
         isProcessing = false;
-
-        if (activeTotalBytes > 0) {
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 600;
-          silenceTimer = setTimeout(() => {
-            if (currentMode === 1 && !isProcessing) {
-              flushAndTranscribe();
-            }
-          }, silenceMs);
-        }
       }
     }
 
     function handleAudioData(normalized) {
       const rms = calculateRMS(normalized);
-      const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 250;
+      const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 200;
 
       if (rms >= threshold) {
         if (activePcmChunks.length === 0 && preRingBuffer.length > 0) {
@@ -574,11 +538,11 @@
         activeTotalBytes += normalized.length;
 
         if (currentMode === 1 && !isProcessing) {
-          setStatus(`音声検知中... (${Math.round(activeTotalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
+          setStatus(`録音中...`);
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 600;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 300;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -591,10 +555,6 @@
           if (preRingBuffer.length > MAX_PRE_BUFFER) {
             preRingBuffer.shift();
           }
-        }
-
-        if (currentMode === 1 && activeTotalBytes > 0 && !isProcessing) {
-          setStatus(`無音判定中... (${Math.round(activeTotalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
         }
       }
     }
@@ -619,14 +579,12 @@
 
     window.clearHistory = async function() {
       historyList = [];
-      historyRawEnList = [];
       historyIndex = -1;
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
-      lastProcessedTime = 0;
       await updateDisplays();
-      setStatus('履歴をクリアしました');
+      setStatus('履歴クリア');
     };
 
     window.addEventListener('keydown', (e) => {
@@ -641,7 +599,7 @@
 
     async function initG2() {
       try {
-        setStatus(`G2ブリッジ接続中... [${APP_VERSION}]`);
+        setStatus(`接続中... [${APP_VERSION}]`);
         bridge = await waitForEvenAppBridge();
         
         const mainText = new TextContainerProperty({
@@ -666,7 +624,7 @@
         );
 
         await bridge.audioControl(true);
-        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON\nAPI Keyを入力して発言してください`);
+        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON`);
 
         bridge.onEvenHubEvent(async event => {
           const rawPcm = event.audioEvent?.audioPcm;
@@ -696,7 +654,7 @@
         });
 
       } catch (e) {
-        setStatus("SDK接続エラー: " + e.message);
+        setStatus("接続エラー: " + e.message);
       }
     }
 
