@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (Deepgram + DeepL)</title>
+  <title>EVEN G2 Translator App (Deepgram + DeepL Workers)</title>
   <style>
     body {
       background-color: #111;
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.2 (DeepL CORS修正済)</span>
+      <span class="version-badge" id="versionBadge">v3.3 (Workers CORS・高速化対応)</span>
     </h2>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -207,7 +207,8 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.2 (DeepL CORS修正済)";
+    const APP_VERSION = "v3.3 (Workers CORS・高速化対応)";
+    const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev/";
 
     let bridge = null;
     let currentMode = 1;
@@ -335,20 +336,23 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // DeepL 翻訳 (ブラウザCORS回避対応 + OpenAIフォールバック)
+    // DeepL 翻訳 (専用 Cloudflare Worker 経由 + OpenAI フォールバック)
     async function translateText(text) {
       const deeplKey = document.getElementById('deeplKey').value.trim();
       
       if (deeplKey) {
-        const isFree = deeplKey.endsWith(':fx');
-        const apiHost = isFree ? 'api-free.deepl.com' : 'api.deepl.com';
-
-        // 方法1: GETパラメータ指定 + CORSプロキシ経由
         try {
-          const targetUrl = `https://${apiHost}/v2/translate?auth_key=${encodeURIComponent(deeplKey)}&text=${encodeURIComponent(text)}&target_lang=JA`;
-          const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+          // 自前 Cloudflare Worker 経由でリクエスト (CORS完全回避 & 超高速通信)
+          const response = await fetch(WORKER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: text,
+              target_lang: 'JA',
+              auth_key: deeplKey
+            })
+          });
 
-          const response = await fetch(proxyUrl);
           if (response.ok) {
             const data = await response.json();
             if (data.translations && data.translations[0]) {
@@ -356,23 +360,7 @@
             }
           }
         } catch (e) {
-          console.warn("DeepL Method 1 failed:", e);
-        }
-
-        // 方法2: 代替プロキシ経由
-        try {
-          const targetUrl = `https://${apiHost}/v2/translate?auth_key=${encodeURIComponent(deeplKey)}&text=${encodeURIComponent(text)}&target_lang=JA`;
-          const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
-
-          const response = await fetch(proxyUrl);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.translations && data.translations[0]) {
-              return data.translations[0].text;
-            }
-          }
-        } catch (e) {
-          console.warn("DeepL Method 2 failed:", e);
+          console.warn("Workers DeepL Translation failed:", e);
         }
       }
 
@@ -457,7 +445,7 @@
 
           lastProcessedTime = now;
 
-          setStatus(`翻訳処理中...`);
+          setStatus(`翻訳処理中 (Worker)...`);
           const jaTranslation = await translateText(fullEnText);
 
           let currentContent = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
@@ -754,7 +742,7 @@
 
     window.forceSendPTT = function() {
       if (currentMode !== 2) {
-        switchMode(2);
+        window.switchMode(2);
       }
       flushAndTranscribe();
     };
