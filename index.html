@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v1.7 (無音&表示最適化版)</span>
+      <span class="version-badge" id="versionBadge">v2.0 (段階表示&Streaming版)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -194,7 +194,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v1.7 (無音&表示最適化版)";
+    const APP_VERSION = "v2.0 (段階表示&Streaming版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -355,8 +355,41 @@
         const enText = data.text ? data.text.trim() : '';
 
         if (!isNoiseOrFiller(enText)) {
-          setStatus(`GPT生成中: "${enText}"`);
+          // --- 段階表示: フェーズ1 (相手のテキストを超高速で日本語訳して速攻表示) ---
+          setStatus(`相手発言を速攻翻訳中...`);
+          let jaTranslation = "";
+          try {
+            const transResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+              body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                temperature: 0.1,
+                messages: [
+                  { role: 'system', content: '入力された英語を自然で簡潔な日本語に直訳してください。翻訳文のみ出力すること。' },
+                  { role: 'user', content: enText }
+                ]
+              })
+            });
+            if (transResponse.ok) {
+              const transData = await transResponse.json();
+              jaTranslation = transData.choices[0].message.content.trim();
+            }
+          } catch(e) {
+            console.warn("速攻翻訳エラー:", e);
+          }
 
+          // 相手欄のテキストを作成し、GPT返答を待たずに即座にG2に送信用追加
+          let currentContent = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
+          
+          historyList.push(currentContent);
+          if (historyList.length > 10) historyList.shift();
+          historyIndex = historyList.length - 1;
+
+          await updateDisplays();
+          setStatus(`【返答ヒント】ストリーミング生成中...`);
+
+          // --- 段階表示: フェーズ2 (GPT返答をストリーミング受信しながらリアルタイム追記) ---
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -367,16 +400,12 @@
               model: 'gpt-4o-mini',
               temperature: 0.2,
               max_tokens: 200,
+              stream: true, // ストリーミング有効化
               messages: [
                 {
                   role: 'system',
-                  content: `あなたはスマートグラス用の通訳・回答アシスタントです。入力された英語音声を処理し、必ず以下のフォーマット通りに全ての項目を出力してください。【相手】の項目を省略することは厳禁です。
+                  content: `あなたはスマートグラス用の通訳・回答アシスタントです。入力された英語に対する【返答ヒント】のみを以下の3行フォーマットで出力してください。
 
-【相手】
-(英語原文)
-(日本語訳)
--------------------
-【返答ヒント】
 (自然で短めの英語一文)
 (カタカナフリガナ)
 (日本語訳)`
@@ -391,15 +420,44 @@
             throw new Error(errJson.error?.message || `GPT HTTP ${chatResponse.status}`);
           }
 
-          const chatData = await chatResponse.json();
-          const aiReply = chatData.choices[0].message.content;
+          const reader = chatResponse.body.getReader();
+          const decoder = new TextDecoder("utf-8");
+          let hintText = "";
+          let lastRenderTime = Date.now();
 
-          historyList.push(aiReply);
-          if (historyList.length > 10) historyList.shift();
-          historyIndex = historyList.length - 1;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split("\n");
+
+            for (const line of lines) {
+              if (line.startsWith("data: ") && line !== "data: [DONE]") {
+                try {
+                  const json = JSON.parse(line.slice(6));
+                  const token = json.choices[0]?.delta?.content || "";
+                  hintText += token;
+
+                  // G2描画への過負荷を防ぐため100msごとに間引き更新（スロットリング）
+                  const now = Date.now();
+                  if (now - lastRenderTime > 100) {
+                    historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
+                    await updateDisplays();
+                    lastRenderTime = now;
+                  }
+                } catch (e) {
+                  // パースエラーは無視
+                }
+              }
+            }
+          }
+
+          // 完了時の最終描画更新
+          historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
           await updateDisplays();
           setStatus('次を待機中...');
+
         } else {
           setStatus(`ノイズ除去: "${enText}" -> 次を待機中`);
         }
