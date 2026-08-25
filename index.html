@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v2.0 (段階表示&Streaming版)</span>
+      <span class="version-badge" id="versionBadge">v2.2 (完全ノンドロップ版)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -174,6 +174,12 @@
       <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">300</span></label>
       <input type="range" id="noiseThreshold" min="50" max="2000" value="300" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
       <div style="font-size:10px; color:#888;">※この値以下の環境音・ノイズは「無音」として無視されます</div>
+    </div>
+
+    <div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">2.5</span>秒</label>
+      <input type="range" id="silenceSec" min="1.0" max="5.0" step="0.5" value="2.5" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※長めのポーズ（間）を許容する場合は2.5〜3.5秒に設定してください</div>
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -194,13 +200,14 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v2.0 (段階表示&Streaming版)";
+    const APP_VERSION = "v2.2 (完全ノンドロップ版)";
 
     let bridge = null;
     let currentMode = 1;
 
-    let pcmChunks = [];
-    let totalBytes = 0;
+    let activePcmChunks = [];
+    let activeTotalBytes = 0;
+
     let isProcessing = false;
     let silenceTimer = null;
 
@@ -318,17 +325,18 @@
         return;
       }
 
-      if (totalBytes < 3200) {
-        setStatus(`データ不足のためスキップ (${totalBytes} bytes)`);
+      if (activeTotalBytes < 3200) {
+        setStatus(`データ不足のためスキップ (${activeTotalBytes} bytes)`);
         return;
       }
 
       isProcessing = true;
-      const chunksToProcess = [...pcmChunks];
-      const bytesToProcess = totalBytes;
+      const chunksToProcess = [...activePcmChunks];
+      const bytesToProcess = activeTotalBytes;
       
-      pcmChunks = [];
-      totalBytes = 0;
+      // 送信対象データを切り出してメインバッファをリセット
+      activePcmChunks = [];
+      activeTotalBytes = 0;
 
       try {
         setStatus(`Whisperへ送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
@@ -355,7 +363,7 @@
         const enText = data.text ? data.text.trim() : '';
 
         if (!isNoiseOrFiller(enText)) {
-          // --- 段階表示: フェーズ1 (相手のテキストを超高速で日本語訳して速攻表示) ---
+          // --- フェーズ1: 相手テキストの翻訳 ---
           setStatus(`相手発言を速攻翻訳中...`);
           let jaTranslation = "";
           try {
@@ -379,7 +387,6 @@
             console.warn("速攻翻訳エラー:", e);
           }
 
-          // 相手欄のテキストを作成し、GPT返答を待たずに即座にG2に送信用追加
           let currentContent = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
           
           historyList.push(currentContent);
@@ -389,7 +396,7 @@
           await updateDisplays();
           setStatus(`【返答ヒント】ストリーミング生成中...`);
 
-          // --- 段階表示: フェーズ2 (GPT返答をストリーミング受信しながらリアルタイム追記) ---
+          // --- フェーズ2: GPT返答ストリーミング ---
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -400,7 +407,7 @@
               model: 'gpt-4o-mini',
               temperature: 0.2,
               max_tokens: 200,
-              stream: true, // ストリーミング有効化
+              stream: true,
               messages: [
                 {
                   role: 'system',
@@ -439,7 +446,6 @@
                   const token = json.choices[0]?.delta?.content || "";
                   hintText += token;
 
-                  // G2描画への過負荷を防ぐため100msごとに間引き更新（スロットリング）
                   const now = Date.now();
                   if (now - lastRenderTime > 100) {
                     historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
@@ -447,13 +453,12 @@
                     lastRenderTime = now;
                   }
                 } catch (e) {
-                  // パースエラーは無視
+                  // 無視
                 }
               }
             }
           }
 
-          // 完了時の最終描画更新
           historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
           await updateDisplays();
           setStatus('次を待機中...');
@@ -466,33 +471,43 @@
         setStatus('エラー: ' + e.message);
       } finally {
         isProcessing = false;
-      }
-    }
 
-    function handleAudioData(normalized) {
-      if (isProcessing) return;
-
-      const rms = calculateRMS(normalized);
-      const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 300;
-
-      if (rms >= threshold) {
-        pcmChunks.push(normalized);
-        totalBytes += normalized.length;
-
-        if (currentMode === 1) {
-          setStatus(`音声検知中... (${Math.round(totalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
-
-          if (silenceTimer) clearTimeout(silenceTimer);
-          // 息継ぎでの途切れを防ぐため無音判定タイマーを1000ms（1.0秒）に設定
+        // 処理中に新しく溜まった音声があれば即座に無音タイマーを再起動して追及処理
+        if (activeTotalBytes > 0) {
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 2500;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
             }
-          }, 1000);
+          }, silenceMs);
+        }
+      }
+    }
+
+    function handleAudioData(normalized) {
+      const rms = calculateRMS(normalized);
+      const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 300;
+
+      // 処理中であっても音声データは常に蓄積して絶対に捨てない（ノンドロップ構造）
+      if (rms >= threshold) {
+        activePcmChunks.push(normalized);
+        activeTotalBytes += normalized.length;
+
+        if (currentMode === 1 && !isProcessing) {
+          setStatus(`音声検知中... (${Math.round(activeTotalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
+
+          if (silenceTimer) clearTimeout(silenceTimer);
+          
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 2500;
+          silenceTimer = setTimeout(() => {
+            if (currentMode === 1 && !isProcessing) {
+              flushAndTranscribe();
+            }
+          }, silenceMs);
         }
       } else {
-        if (currentMode === 1 && totalBytes > 0) {
-          setStatus(`無音判定中... (${Math.round(totalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
+        if (currentMode === 1 && activeTotalBytes > 0 && !isProcessing) {
+          setStatus(`無音判定中... (${Math.round(activeTotalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
         }
       }
     }
@@ -518,6 +533,8 @@
     window.clearHistory = async function() {
       historyList = [];
       historyIndex = -1;
+      activePcmChunks = [];
+      activeTotalBytes = 0;
       await updateDisplays();
       setStatus('履歴をクリアしました');
     };
@@ -624,8 +641,8 @@
 
     window.switchMode = function(mode) {
       currentMode = mode;
-      pcmChunks = [];
-      totalBytes = 0;
+      activePcmChunks = [];
+      activeTotalBytes = 0;
       isProcessing = false;
       if (silenceTimer) clearTimeout(silenceTimer);
       updateUIOnly(currentMode);
