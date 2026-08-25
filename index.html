@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v2.3 (爆速レスポンス)</span>
+      <span class="version-badge" id="versionBadge">v2.4 (逐次送信＆即時追記)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -176,9 +176,9 @@
     </div>
 
     <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">1.0</span>秒</label>
-      <input type="range" id="silenceSec" min="0.5" max="3.0" step="0.1" value="1.0" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※速さ優先なら0.8〜1.2秒推奨（短時間のポーズで即時送信）</div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.5</span>秒</label>
+      <input type="range" id="silenceSec" min="0.3" max="3.0" step="0.1" value="0.5" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※息継ぎで速攻送信するなら 0.4〜0.6秒 推奨</div>
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -199,7 +199,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v2.3 (爆速レスポンス)";
+    const APP_VERSION = "v2.4 (逐次送信＆即時追記)";
 
     let bridge = null;
     let currentMode = 1;
@@ -211,8 +211,8 @@
     let silenceTimer = null;
 
     let historyList = [];
-    let historyRawEnList = []; // コンカチ判定用に生の英語履歴を保持
-    let lastProcessedTime = 0; // 直前送信のタイムスタンプ
+    let historyRawEnList = [];
+    let lastProcessedTime = 0;
     let historyIndex = -1;
 
     function getDisplayText() {
@@ -322,11 +322,14 @@
 
       const apiKey = document.getElementById('apiKey').value.trim();
       if (!apiKey) {
-        setStatus('エラー: API Keyを入力してください');
+        setStatus('⚠️ エラー: API Keyを入力してください');
+        activePcmChunks = [];
+        activeTotalBytes = 0;
         return;
       }
 
-      if (activeTotalBytes < 3200) {
+      // 最低限の音声サイズ（約0.1秒分）
+      if (activeTotalBytes < 1600) {
         setStatus(`データ不足のためスキップ (${activeTotalBytes} bytes)`);
         return;
       }
@@ -339,7 +342,7 @@
       activeTotalBytes = 0;
 
       try {
-        setStatus(`Whisperへ送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
+        setStatus(`Whisperへ速攻送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
         
         const formData = new FormData();
@@ -364,8 +367,8 @@
 
         if (!isNoiseOrFiller(newEnText)) {
           const now = Date.now();
-          // 直前処理から6秒以内の続きの発言であれば「結合（コンカチ）」判定にする
-          const isContinuation = (now - lastProcessedTime < 6000) && (historyRawEnList.length > 0);
+          // 前回の送信から8秒以内であれば同じ会話ブロックとして結合（コンカチ）
+          const isContinuation = (now - lastProcessedTime < 8000) && (historyRawEnList.length > 0);
           
           let fullEnText = newEnText;
           if (isContinuation) {
@@ -379,7 +382,6 @@
 
           lastProcessedTime = now;
 
-          // --- 相手発言の日本語直訳 ---
           setStatus(`相手発言を速攻翻訳中...`);
           let jaTranslation = "";
           try {
@@ -415,9 +417,8 @@
           }
 
           await updateDisplays();
-          setStatus(`【返答ヒント】ストリーミング生成中...`);
+          setStatus(`【返答ヒント】更新ストリーミング中...`);
 
-          // --- GPT返答ストリーミング ---
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -493,8 +494,9 @@
       } finally {
         isProcessing = false;
 
+        // 送信中に溜まった後続の音声データがあればすぐにタイマーセット
         if (activeTotalBytes > 0) {
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 1000;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 500;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -517,7 +519,7 @@
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 1000;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 500;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -597,7 +599,7 @@
         );
 
         await bridge.audioControl(true);
-        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON\n音声待機中...`);
+        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON\nAPI Keyを入力して発言してください`);
 
         bridge.onEvenHubEvent(async event => {
           const rawPcm = event.audioEvent?.audioPcm;
