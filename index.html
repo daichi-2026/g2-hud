@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v2.4 (逐次送信＆即時追記)</span>
+      <span class="version-badge" id="versionBadge">v2.5 (Whisper補正強化)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -171,14 +171,14 @@
     </div>
     
     <div>
-      <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">300</span></label>
-      <input type="range" id="noiseThreshold" min="50" max="2000" value="300" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+      <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">250</span></label>
+      <input type="range" id="noiseThreshold" min="50" max="2000" value="250" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
     </div>
 
     <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.5</span>秒</label>
-      <input type="range" id="silenceSec" min="0.3" max="3.0" step="0.1" value="0.5" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※息継ぎで速攻送信するなら 0.4〜0.6秒 推奨</div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.6</span>秒</label>
+      <input type="range" id="silenceSec" min="0.3" max="3.0" step="0.1" value="0.6" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※頭欠け防止のため 0.5〜0.7秒 推奨</div>
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -199,13 +199,17 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v2.4 (逐次送信＆即時追記)";
+    const APP_VERSION = "v2.5 (Whisper補正強化)";
 
     let bridge = null;
     let currentMode = 1;
 
     let activePcmChunks = [];
     let activeTotalBytes = 0;
+    
+    // 話し始めの頭欠けを防ぐためのバッファリング (直近3フレーム保持)
+    let preRingBuffer = [];
+    const MAX_PRE_BUFFER = 3;
 
     let isProcessing = false;
     let silenceTimer = null;
@@ -272,7 +276,6 @@
       view.setUint16(20, 1, true);
       view.setUint16(22, numChannels, true);
       view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
       view.setUint16(32, numChannels * (bitsPerSample / 8), true);
       view.setUint16(34, bitsPerSample, true);
 
@@ -328,7 +331,6 @@
         return;
       }
 
-      // 最低限の音声サイズ（約0.1秒分）
       if (activeTotalBytes < 1600) {
         setStatus(`データ不足のためスキップ (${activeTotalBytes} bytes)`);
         return;
@@ -342,7 +344,7 @@
       activeTotalBytes = 0;
 
       try {
-        setStatus(`Whisperへ速攻送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
+        setStatus(`Whisperへ補正送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
         
         const formData = new FormData();
@@ -350,6 +352,10 @@
         formData.append('model', 'whisper-1');
         formData.append('language', 'en');
         formData.append('temperature', '0');
+
+        // Whisper認識精度向上のためのPrompt（文脈指示）
+        const promptText = "It's already late August, but it's still so hot. Everyday conversation about weather, greetings, and daily life.";
+        formData.append('prompt', promptText);
 
         const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
           method: 'POST',
@@ -367,7 +373,6 @@
 
         if (!isNoiseOrFiller(newEnText)) {
           const now = Date.now();
-          // 前回の送信から8秒以内であれば同じ会話ブロックとして結合（コンカチ）
           const isContinuation = (now - lastProcessedTime < 8000) && (historyRawEnList.length > 0);
           
           let fullEnText = newEnText;
@@ -382,7 +387,7 @@
 
           lastProcessedTime = now;
 
-          setStatus(`相手発言を速攻翻訳中...`);
+          setStatus(`相手発言を即時翻訳中...`);
           let jaTranslation = "";
           try {
             const transResponse = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -402,7 +407,7 @@
               jaTranslation = transData.choices[0].message.content.trim();
             }
           } catch(e) {
-            console.warn("速攻翻訳エラー:", e);
+            console.warn("翻訳エラー:", e);
           }
 
           let currentContent = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
@@ -417,7 +422,7 @@
           }
 
           await updateDisplays();
-          setStatus(`【返答ヒント】更新ストリーミング中...`);
+          setStatus(`【返答ヒント】生成中...`);
 
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -494,9 +499,8 @@
       } finally {
         isProcessing = false;
 
-        // 送信中に溜まった後続の音声データがあればすぐにタイマーセット
         if (activeTotalBytes > 0) {
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 500;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 600;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -508,9 +512,18 @@
 
     function handleAudioData(normalized) {
       const rms = calculateRMS(normalized);
-      const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 300;
+      const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 250;
 
       if (rms >= threshold) {
+        // 発話検知時、直前のプリバッファ（話し始めの頭音）を結合
+        if (activePcmChunks.length === 0 && preRingBuffer.length > 0) {
+          for (const preChunk of preRingBuffer) {
+            activePcmChunks.push(preChunk);
+            activeTotalBytes += preChunk.length;
+          }
+          preRingBuffer = [];
+        }
+
         activePcmChunks.push(normalized);
         activeTotalBytes += normalized.length;
 
@@ -519,7 +532,7 @@
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 500;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 600;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -527,6 +540,14 @@
           }, silenceMs);
         }
       } else {
+        // 無音時は直前数フレームを常時保持（話し始めの頭欠け防止）
+        if (activePcmChunks.length === 0) {
+          preRingBuffer.push(normalized);
+          if (preRingBuffer.length > MAX_PRE_BUFFER) {
+            preRingBuffer.shift();
+          }
+        }
+
         if (currentMode === 1 && activeTotalBytes > 0 && !isProcessing) {
           setStatus(`無音判定中... (${Math.round(activeTotalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
         }
@@ -557,6 +578,7 @@
       historyIndex = -1;
       activePcmChunks = [];
       activeTotalBytes = 0;
+      preRingBuffer = [];
       lastProcessedTime = 0;
       await updateDisplays();
       setStatus('履歴をクリアしました');
@@ -666,6 +688,7 @@
       currentMode = mode;
       activePcmChunks = [];
       activeTotalBytes = 0;
+      preRingBuffer = [];
       isProcessing = false;
       if (silenceTimer) clearTimeout(silenceTimer);
       updateUIOnly(currentMode);
