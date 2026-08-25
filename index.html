@@ -157,7 +157,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.3</span>
+      <span class="version-badge" id="versionBadge">v3.4</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -193,7 +193,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.3 (1ページ目完全固定修正版)";
+    const APP_VERSION = "v3.4 (根本バグ修正・完全手動表示版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -208,7 +208,7 @@
     let silenceTimer = null;
 
     let historyList = [];
-    let historyIndex = 0; // 常に0（1ページ目）を指す初期設定
+    let historyIndex = 0; // ユーザーが現在見ているページ番号 (0スタート)
 
     function getDisplayText() {
       if (historyList.length === 0) {
@@ -217,12 +217,13 @@
           : "タップ操作で音声送信\n（ボタンを押して会話を開始）";
       }
       
-      // 厳格な境界チェック（手動で選択されているインデックスを保護）
-      if (historyIndex < 0) historyIndex = 0;
-      if (historyIndex >= historyList.length) historyIndex = historyList.length - 1;
+      // ★修正: historyIndexを変えずに、安全な表示用インデックスのみを算出
+      let displayIdx = historyIndex;
+      if (displayIdx < 0) displayIdx = 0;
+      if (displayIdx >= historyList.length) displayIdx = historyList.length - 1;
 
-      const item = historyList[historyIndex];
-      const navInfo = `[${historyIndex + 1}/${historyList.length}] -------------------\n`;
+      const item = historyList[displayIdx];
+      const navInfo = `[${displayIdx + 1}/${historyList.length}] -------------------\n`;
       return navInfo + item;
     }
 
@@ -396,12 +397,11 @@
           historyList.push(currentContent);
           if (historyList.length > 10) historyList.shift();
 
-          // 新規追加された要素のインデックス
           const targetItemIndex = historyList.length - 1;
 
-          // ★重要: historyIndexを書き換えず手動選択された画面を完全固定
+          // ★ historyIndex は絶対に変更しない（手動のページ固定を死守）
           await updateDisplays();
-          setStatus(`新着履歴追加 [${historyList.length}件] (現在表示: [${historyIndex + 1}/${historyList.length}])`);
+          setStatus(`新着履歴追加 [全${historyList.length}件] (現在表示: [${historyIndex + 1}/${historyList.length}])`);
 
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -538,26 +538,27 @@
       await sendToG2Display(displayText);
     }
 
+    // 手動ページ送り関数（範囲チェックをここで行う）
     function prevPage() {
       if (historyList.length === 0) return;
       if (historyIndex > 0) {
         historyIndex--;
-        updateDisplays();
-        setStatus(`ページ移動: [${historyIndex + 1}/${historyList.length}]`);
       } else {
-        setStatus(`最初の履歴を表示中です [1/${historyList.length}]`);
+        historyIndex = 0;
       }
+      updateDisplays();
+      setStatus(`ページ移動: [${historyIndex + 1}/${historyList.length}]`);
     }
 
     function nextPage() {
       if (historyList.length === 0) return;
       if (historyIndex < historyList.length - 1) {
         historyIndex++;
-        updateDisplays();
-        setStatus(`ページ移動: [${historyIndex + 1}/${historyList.length}]`);
       } else {
-        setStatus(`最新の履歴を表示中です [${historyList.length}/${historyList.length}]`);
+        historyIndex = historyList.length - 1;
       }
+      updateDisplays();
+      setStatus(`ページ移動: [${historyIndex + 1}/${historyList.length}]`);
     }
 
     // ボタン直接バインド
