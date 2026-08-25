@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (Deepgram + DeepL Workers)</title>
+  <title>EVEN G2 Translator App (v3.5 Continuous Stream)</title>
   <style>
     body {
       background-color: #111;
@@ -125,14 +125,14 @@
 
   <div class="glass-container">
     <div class="mode-tab-bar">
-      <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 自動トリガー</div>
+      <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 連続リアルタイム</div>
       <div id="tab2" class="mode-tab" onclick="switchMode(2)">2: PTT (押して送信)</div>
     </div>
 
     <div id="glass-display">
       <div id="mode1Screen" class="hud-mode-screen active">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー (↑/↓キーで履歴移動)</div>
+          <div style="color:#00FF00; font-size:10px; font-weight:bold;">連続ストリーミング (↑/↓で履歴)</div>
           <div>
             <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
             <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
@@ -146,7 +146,7 @@
 
       <div id="mode2Screen" class="hud-mode-screen">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 (↑/↓キーで履歴移動)</div>
+          <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 (↑/↓で履歴)</div>
           <div>
             <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
             <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.4 (爆速・高精度化版)</span>
+      <span class="version-badge" id="versionBadge">v3.5 (連続追記対応)</span>
     </h2>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -184,9 +184,8 @@
     </div>
 
     <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.3</span>秒</label>
-      <input type="range" id="silenceSec" min="0.2" max="2.0" step="0.1" value="0.3" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※最速応答のため 0.3秒 に変更</div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.5</span>秒</label>
+      <input type="range" id="silenceSec" min="0.2" max="2.0" step="0.1" value="0.5" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -207,7 +206,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.4 (爆速・高精度化版)";
+    const APP_VERSION = "v3.5 (連続追記対応)";
     const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev/";
 
     let bridge = null;
@@ -217,10 +216,15 @@
     let activeTotalBytes = 0;
     
     let preRingBuffer = [];
-    const MAX_PRE_BUFFER = 5; // 頭欠け防止のためバッファ拡張
+    const MAX_PRE_BUFFER = 5;
 
     let isProcessing = false;
     let silenceTimer = null;
+
+    // 会話セッション管理用
+    let currentEnSession = [];
+    let currentJaSession = [];
+    let sessionLastTime = 0;
 
     let historyList = [];
     let historyIndex = -1;
@@ -310,12 +314,10 @@
       return clean.length <= 1 || fillers.includes(clean);
     }
 
-    // Deepgram 超高速・高精度パラメータ適用
     async function transcribeWithDeepgram(wavBlob) {
       const deepgramKey = document.getElementById('deepgramKey').value.trim();
       if (!deepgramKey) throw new Error("Deepgram API Keyを入力してください");
 
-      // 高精度化のためのパラメータを追加 (smart_format, model=nova-2)
       const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true';
       const response = await fetch(url, {
         method: 'POST',
@@ -335,7 +337,6 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // DeepL 翻訳 (Cloudflare Worker 経由)
     async function translateText(text) {
       const deeplKey = document.getElementById('deeplKey').value.trim();
       
@@ -358,7 +359,7 @@
             }
           }
         } catch (e) {
-          console.warn("Workers DeepL Translation failed:", e);
+          console.warn("Workers DeepL Failed:", e);
         }
       }
 
@@ -384,35 +385,15 @@
             const data = await res.json();
             return data.choices[0].message.content.trim();
           }
-        } catch (e) {
-          console.error("OpenAI Fallback Translation Error:", e);
-        }
+        } catch (e) {}
       }
 
       return "（翻訳取得エラー）";
     }
 
-    async function flushAndTranscribe() {
-      if (silenceTimer) {
-        clearTimeout(silenceTimer);
-        silenceTimer = null;
-      }
-
+    async function processQueue() {
       if (isProcessing) return;
-
-      const deepgramKey = document.getElementById('deepgramKey').value.trim();
-      if (!deepgramKey) {
-        setStatus('⚠️ エラー: Deepgram API Keyを入力してください');
-        activePcmChunks = [];
-        activeTotalBytes = 0;
-        return;
-      }
-
-      if (activeTotalBytes < 1200) {
-        activePcmChunks = [];
-        activeTotalBytes = 0;
-        return;
-      }
+      if (activeTotalBytes < 1200) return;
 
       isProcessing = true;
       const chunksToProcess = [...activePcmChunks];
@@ -422,94 +403,70 @@
       activeTotalBytes = 0;
 
       try {
-        setStatus(`解析中...`);
+        setStatus(`解析・更新中...`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
-        
         let enText = await transcribeWithDeepgram(wavBlob);
 
         if (!isNoiseOrFiller(enText)) {
-          setStatus(`翻訳中...`);
           const jaTranslation = await translateText(enText);
 
-          let currentContent = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
-          
-          historyList.push(currentContent);
-          if (historyList.length > 10) historyList.shift();
+          const now = Date.now();
+          // 8秒以上間隔が空いた場合は新しい履歴枠に分離、それ以内なら継ぎ足し
+          if (now - sessionLastTime > 8000 || currentEnSession.length === 0) {
+            currentEnSession = [enText];
+            currentJaSession = [jaTranslation];
+          } else {
+            currentEnSession.push(enText);
+            currentJaSession.push(jaTranslation);
+          }
+          sessionLastTime = now;
+
+          const fullEn = currentEnSession.join(' ');
+          const fullJa = currentJaSession.join(' ');
+
+          let currentContent = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n生成中...`;
+
+          if (now - sessionLastTime > 8000 || historyList.length === 0) {
+            historyList.push(currentContent);
+          } else {
+            historyList[historyList.length - 1] = currentContent;
+          }
           historyIndex = historyList.length - 1;
 
           await updateDisplays();
 
+          // OpenAI 返答ヒント更新
           const openAiKey = document.getElementById('apiKey').value.trim();
-          if (!openAiKey) {
-            historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n（OpenAI Key未設定）`;
+          if (openAiKey) {
+            fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${openAiKey}`
+              },
+              body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                temperature: 0.2,
+                max_tokens: 150,
+                messages: [
+                  {
+                    role: 'system',
+                    content: `英語の発言に対し、短く返答するヒントを3行で出力してください。\n(短い英語)\n(カタカナフリガナ)\n(日本語訳)`
+                  },
+                  { role: 'user', content: fullEn }
+                ]
+              })
+            }).then(res => res.json()).then(async data => {
+              const hintText = data.choices[0]?.message?.content?.trim() || "";
+              historyList[historyIndex] = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n${hintText}`;
+              await updateDisplays();
+            }).catch(() => {});
+          } else {
+            historyList[historyIndex] = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n（OpenAI Key未設定）`;
             await updateDisplays();
-            setStatus('待機中');
-            return;
           }
 
-          // OpenAI 返答ヒント作成 (超高速ストリーミング)
-          const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openAiKey}`
-            },
-            body: JSON.stringify({
-              model: 'gpt-4o-mini',
-              temperature: 0.2,
-              max_tokens: 150,
-              stream: true,
-              messages: [
-                {
-                  role: 'system',
-                  content: `英語の発言に対し、短く返答するヒントを3行で出力してください。
-(短い英語)
-(カタカナフリガナ)
-(日本語訳)`
-                },
-                { role: 'user', content: enText }
-              ]
-            })
-          });
-
-          if (!chatResponse.ok) {
-            throw new Error(`GPT HTTP ${chatResponse.status}`);
-          }
-
-          const reader = chatResponse.body.getReader();
-          const decoder = new TextDecoder("utf-8");
-          let hintText = "";
-          let lastRenderTime = Date.now();
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split("\n");
-
-            for (const line of lines) {
-              if (line.startsWith("data: ") && line !== "data: [DONE]") {
-                try {
-                  const json = JSON.parse(line.slice(6));
-                  const token = json.choices[0]?.delta?.content || "";
-                  hintText += token;
-
-                  const nowRender = Date.now();
-                  if (nowRender - lastRenderTime > 60) {
-                    historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
-                    await updateDisplays();
-                    lastRenderTime = nowRender;
-                  }
-                } catch (e) {}
-              }
-            }
-          }
-
-          historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
-          await updateDisplays();
           setStatus('待機中');
-
         } else {
           setStatus(`待機中`);
         }
@@ -518,6 +475,10 @@
         setStatus('エラー: ' + e.message);
       } finally {
         isProcessing = false;
+        // 未処理のバッファが残っていれば即座に再実行
+        if (activeTotalBytes >= 1200) {
+          processQueue();
+        }
       }
     }
 
@@ -537,15 +498,15 @@
         activePcmChunks.push(normalized);
         activeTotalBytes += normalized.length;
 
-        if (currentMode === 1 && !isProcessing) {
+        if (currentMode === 1) {
           setStatus(`録音中...`);
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 300;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 500;
           silenceTimer = setTimeout(() => {
-            if (currentMode === 1 && !isProcessing) {
-              flushAndTranscribe();
+            if (currentMode === 1) {
+              processQueue();
             }
           }, silenceMs);
         }
@@ -580,6 +541,8 @@
     window.clearHistory = async function() {
       historyList = [];
       historyIndex = -1;
+      currentEnSession = [];
+      currentJaSession = [];
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
@@ -640,7 +603,7 @@
 
           if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
             if (currentMode === 2) {
-              flushAndTranscribe();
+              processQueue();
             }
           }
 
@@ -702,7 +665,7 @@
       if (currentMode !== 2) {
         window.switchMode(2);
       }
-      flushAndTranscribe();
+      processQueue();
     };
 
     initG2();
