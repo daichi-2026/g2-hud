@@ -134,8 +134,8 @@
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="color:#00FF00; font-size:10px; font-weight:bold;">自動トリガー (↑/↓キーで履歴移動)</div>
           <div>
-            <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
-            <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
+            <button type="button" class="nav-btn" onclick="window.navigateHistory('up')">▲ 前へ</button>
+            <button type="button" class="nav-btn" onclick="window.navigateHistory('down')">▼ 次へ</button>
           </div>
         </div>
         <div id="m1-status" style="color:#888; font-size:11px; margin-top:2px;">音声入力待機中...</div>
@@ -148,8 +148,8 @@
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="color:#00BFFF; font-size:10px; font-weight:bold;">PTT 翻訳 (↑/↓キーで履歴移動)</div>
           <div>
-            <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
-            <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
+            <button type="button" class="nav-btn" onclick="window.navigateHistory('up')">▲ 前へ</button>
+            <button type="button" class="nav-btn" onclick="window.navigateHistory('down')">▼ 次へ</button>
           </div>
         </div>
         <div id="m2-status" style="color:#888; font-size:11px; margin-top:2px;">ボタンで音声送信</div>
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v2.8 (ヒント保持版)</span>
+      <span class="version-badge" id="versionBadge">v2.9</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -199,7 +199,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v2.8 (ヒント保持版)";
+    const APP_VERSION = "v2.9 (ナビ修正版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -392,7 +392,6 @@
             console.warn("翻訳エラー:", e);
           }
 
-          // ★過去の返答ヒントは削除・上書きせず、常に「新しい履歴アイテム」として追加する
           let currentContent = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
           
           historyList.push(currentContent);
@@ -537,14 +536,22 @@
       await sendToG2Display(displayText);
     }
 
+    // ★ナビゲーション関数をグローバルに登録し、引数の文字列判定を確実に処理
     window.navigateHistory = async function(direction) {
       if (historyList.length === 0) return;
-      if (direction === 'up' && historyIndex > 0) {
-        historyIndex--;
-        await updateDisplays();
-      } else if (direction === 'down' && historyIndex < historyList.length - 1) {
-        historyIndex++;
-        await updateDisplays();
+      
+      if (direction === 'up') {
+        if (historyIndex > 0) {
+          historyIndex--;
+          await updateDisplays();
+          setStatus(`表示変更: [${historyIndex + 1}/${historyList.length}]`);
+        }
+      } else if (direction === 'down') {
+        if (historyIndex < historyList.length - 1) {
+          historyIndex++;
+          await updateDisplays();
+          setStatus(`表示変更: [${historyIndex + 1}/${historyList.length}]`);
+        }
       }
     };
 
@@ -558,6 +565,7 @@
       setStatus('履歴をクリアしました');
     };
 
+    // グローバルキーボードイベントのバインド
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -595,7 +603,7 @@
         );
 
         await bridge.audioControl(true);
-        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON\nAPI Keyを入力して発言してください`);
+        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON`);
 
         bridge.onEvenHubEvent(async event => {
           const rawPcm = event.audioEvent?.audioPcm;
@@ -616,6 +624,8 @@
           }
 
           const evt = sysType || textType;
+
+          // ★グラス操作イベントの割り当て（フリック向上/上キー -> 前へ、フリック向下/下キー -> 次へ）
           if (evt === OsEventTypeList.UP_EVENT || evt === OsEventTypeList.SCROLL_UP_EVENT || evt === OsEventTypeList.FLICK_UP_EVENT) {
             window.navigateHistory('up');
           }
