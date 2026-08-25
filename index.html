@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v2.2 (完全ノンドロップ版)</span>
+      <span class="version-badge" id="versionBadge">v2.3 (爆速レスポンス)</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -173,13 +173,12 @@
     <div>
       <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">300</span></label>
       <input type="range" id="noiseThreshold" min="50" max="2000" value="300" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※この値以下の環境音・ノイズは「無音」として無視されます</div>
     </div>
 
     <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">2.5</span>秒</label>
-      <input type="range" id="silenceSec" min="1.0" max="5.0" step="0.5" value="2.5" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※長めのポーズ（間）を許容する場合は2.5〜3.5秒に設定してください</div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">1.0</span>秒</label>
+      <input type="range" id="silenceSec" min="0.5" max="3.0" step="0.1" value="1.0" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※速さ優先なら0.8〜1.2秒推奨（短時間のポーズで即時送信）</div>
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -200,7 +199,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v2.2 (完全ノンドロップ版)";
+    const APP_VERSION = "v2.3 (爆速レスポンス)";
 
     let bridge = null;
     let currentMode = 1;
@@ -212,6 +211,8 @@
     let silenceTimer = null;
 
     let historyList = [];
+    let historyRawEnList = []; // コンカチ判定用に生の英語履歴を保持
+    let lastProcessedTime = 0; // 直前送信のタイムスタンプ
     let historyIndex = -1;
 
     function getDisplayText() {
@@ -334,7 +335,6 @@
       const chunksToProcess = [...activePcmChunks];
       const bytesToProcess = activeTotalBytes;
       
-      // 送信対象データを切り出してメインバッファをリセット
       activePcmChunks = [];
       activeTotalBytes = 0;
 
@@ -360,10 +360,26 @@
         }
 
         const data = await response.json();
-        const enText = data.text ? data.text.trim() : '';
+        let newEnText = data.text ? data.text.trim() : '';
 
-        if (!isNoiseOrFiller(enText)) {
-          // --- フェーズ1: 相手テキストの翻訳 ---
+        if (!isNoiseOrFiller(newEnText)) {
+          const now = Date.now();
+          // 直前処理から6秒以内の続きの発言であれば「結合（コンカチ）」判定にする
+          const isContinuation = (now - lastProcessedTime < 6000) && (historyRawEnList.length > 0);
+          
+          let fullEnText = newEnText;
+          if (isContinuation) {
+            const prevEn = historyRawEnList[historyRawEnList.length - 1];
+            fullEnText = `${prevEn} ${newEnText}`;
+            historyRawEnList[historyRawEnList.length - 1] = fullEnText;
+          } else {
+            historyRawEnList.push(fullEnText);
+            if (historyRawEnList.length > 10) historyRawEnList.shift();
+          }
+
+          lastProcessedTime = now;
+
+          // --- 相手発言の日本語直訳 ---
           setStatus(`相手発言を速攻翻訳中...`);
           let jaTranslation = "";
           try {
@@ -375,7 +391,7 @@
                 temperature: 0.1,
                 messages: [
                   { role: 'system', content: '入力された英語を自然で簡潔な日本語に直訳してください。翻訳文のみ出力すること。' },
-                  { role: 'user', content: enText }
+                  { role: 'user', content: fullEnText }
                 ]
               })
             });
@@ -387,16 +403,21 @@
             console.warn("速攻翻訳エラー:", e);
           }
 
-          let currentContent = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
+          let currentContent = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
           
-          historyList.push(currentContent);
-          if (historyList.length > 10) historyList.shift();
-          historyIndex = historyList.length - 1;
+          if (isContinuation) {
+            historyList[historyList.length - 1] = currentContent;
+            historyIndex = historyList.length - 1;
+          } else {
+            historyList.push(currentContent);
+            if (historyList.length > 10) historyList.shift();
+            historyIndex = historyList.length - 1;
+          }
 
           await updateDisplays();
           setStatus(`【返答ヒント】ストリーミング生成中...`);
 
-          // --- フェーズ2: GPT返答ストリーミング ---
+          // --- GPT返答ストリーミング ---
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -417,7 +438,7 @@
 (カタカナフリガナ)
 (日本語訳)`
                 },
-                { role: 'user', content: enText }
+                { role: 'user', content: fullEnText }
               ]
             })
           });
@@ -446,11 +467,11 @@
                   const token = json.choices[0]?.delta?.content || "";
                   hintText += token;
 
-                  const now = Date.now();
-                  if (now - lastRenderTime > 100) {
-                    historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
+                  const nowRender = Date.now();
+                  if (nowRender - lastRenderTime > 80) {
+                    historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
                     await updateDisplays();
-                    lastRenderTime = now;
+                    lastRenderTime = nowRender;
                   }
                 } catch (e) {
                   // 無視
@@ -459,12 +480,12 @@
             }
           }
 
-          historyList[historyIndex] = `【相手】\n${enText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
+          historyList[historyIndex] = `【相手】\n${fullEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText.trim()}`;
           await updateDisplays();
           setStatus('次を待機中...');
 
         } else {
-          setStatus(`ノイズ除去: "${enText}" -> 次を待機中`);
+          setStatus(`ノイズ除去: "${newEnText}" -> 次を待機中`);
         }
       } catch (e) {
         console.error(e);
@@ -472,9 +493,8 @@
       } finally {
         isProcessing = false;
 
-        // 処理中に新しく溜まった音声があれば即座に無音タイマーを再起動して追及処理
         if (activeTotalBytes > 0) {
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 2500;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 1000;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -488,7 +508,6 @@
       const rms = calculateRMS(normalized);
       const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 300;
 
-      // 処理中であっても音声データは常に蓄積して絶対に捨てない（ノンドロップ構造）
       if (rms >= threshold) {
         activePcmChunks.push(normalized);
         activeTotalBytes += normalized.length;
@@ -498,7 +517,7 @@
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 2500;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 1000;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1 && !isProcessing) {
               flushAndTranscribe();
@@ -532,9 +551,11 @@
 
     window.clearHistory = async function() {
       historyList = [];
+      historyRawEnList = [];
       historyIndex = -1;
       activePcmChunks = [];
       activeTotalBytes = 0;
+      lastProcessedTime = 0;
       await updateDisplays();
       setStatus('履歴をクリアしました');
     };
