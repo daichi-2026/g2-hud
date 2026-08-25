@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>リアルタイム文字起こし・翻訳通訳アシスタント V4.1 (グラス連携対応)</title>
+<title>リアルタイム文字起こし・翻訳通訳アシスタント V4.2 (G2対応)</title>
 <style>
   body {
     font-family: sans-serif;
@@ -20,7 +20,7 @@
   }
   h1 {
     font-size: 1.5rem;
-    margin-bottom: 10px;
+    margin-bottom: 15px;
   }
   .control-panel {
     display: grid;
@@ -72,7 +72,7 @@
     font-size: 1.1rem;
     padding: 15px;
     border-radius: 6px;
-    min-height: 220px;
+    min-height: 240px;
     white-space: pre-wrap;
     word-wrap: break-word;
   }
@@ -81,18 +81,12 @@
     display: flex;
     gap: 10px;
   }
-  .glasses-btn {
-    background-color: #28a745;
-  }
-  .glasses-btn:hover {
-    background-color: #218838;
-  }
 </style>
 </head>
 <body>
 
 <div class="container">
-  <h1>リアルタイム文字起こし・翻訳通訳アシスタント V4.1</h1>
+  <h1>リアルタイム文字起こし・翻訳通訳アシスタント V4.2</h1>
 
   <div class="control-panel">
     <div>
@@ -111,19 +105,18 @@
       <label>無音判定時間 (秒):</label>
       <input type="number" id="silenceSec" value="1.2" step="0.1" min="0.5" />
     </div>
-    <div>
-      <label>グラスディスプレイ操作:</label>
-      <button id="openGlassesBtn" class="glasses-btn">グラス用画面を開く / 再接続</button>
-    </div>
-    <div>
-      <label>録音操作:</label>
-      <button id="startBtn">録音開始</button>
-      <button id="stopBtn" disabled style="margin-top:5px; background-color:#dc3545;">録音停止</button>
+    <div style="grid-column: span 2;">
+      <label>操作:</label>
+      <div style="display:flex; gap:10px;">
+        <button id="startBtn" style="flex:1;">録音開始</button>
+        <button id="stopBtn" disabled style="flex:1; background-color:#dc3545;">録音停止</button>
+      </div>
     </div>
   </div>
 
-  <div class="status" id="statusText">ステータス: 待機中 (V4.1)</div>
+  <div class="status" id="statusText">ステータス: 待機中 (V4.2)</div>
 
+  <!-- メイン表示領域 兼 G2グラス転送用要素 -->
   <div class="display-box" id="displayBox">ここに会話と翻訳、返答ヒントが表示されます...</div>
 
   <div class="nav-buttons">
@@ -154,23 +147,17 @@ let historyIndex = -1;
 let currentActiveIndex = -1;
 let currentMode = 0; // 0: 無音待機, 1: 発話中
 
-let glassesWindow = null; // グラス表示用別ウィンドウ参照
-
 // Node / HTML要素
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
-const openGlassesBtn = document.getElementById('openGlassesBtn');
 const statusText = document.getElementById('statusText');
 const displayBox = document.getElementById('displayBox');
 const prevBtn = document.getElementById('prevBtn');
 const nextBtn = document.getElementById('nextBtn');
 
-// ==========================================
-// イベントリスナー設定
-// ==========================================
+// イベントリスナー
 startBtn.addEventListener('click', startRecording);
 stopBtn.addEventListener('click', stopRecording);
-openGlassesBtn.addEventListener('click', openGlassesDisplay);
 prevBtn.addEventListener('click', showPrevHistory);
 nextBtn.addEventListener('click', showNextHistory);
 
@@ -186,52 +173,46 @@ function isNoiseOrFiller(text) {
 }
 
 // ==========================================
-// スマートグラス（Glasses Display）ウィンドウ制御
+// G2グラスディスプレイ表示更新処理
 // ==========================================
-function openGlassesDisplay() {
-  glassesWindow = window.open("", "GlassesDisplay", "width=600,height=400,resizable=yes");
-  if (glassesWindow) {
-    glassesWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Glasses Display</title>
-        <style>
-          body {
-            background-color: #000;
-            color: #00ffcc;
-            font-family: monospace;
-            font-size: 1.3rem;
-            padding: 15px;
-            margin: 0;
-            white-space: pre-wrap;
-            word-break: break-word;
-          }
-        </style>
-      </head>
-      <body>
-        <div id="content">Glasses Display Ready...</div>
-      </body>
-      </html>
-    `);
-    glassesWindow.document.close();
-    setStatus("グラス用ウィンドウと接続しました");
-  } else {
-    alert("ポップアップブロックが有効になっている可能性があります。ブラウザの設定で許可してください。");
+function updateDisplays() {
+  if (historyList.length === 0) {
+    const defaultMsg = "会話データがありません";
+    displayBox.innerText = defaultMsg;
+    sendToG2Glass(defaultMsg);
+    return;
   }
+
+  if (currentActiveIndex !== -1) {
+    historyIndex = currentActiveIndex;
+  } else if (historyIndex === -1 || historyIndex >= historyList.length) {
+    historyIndex = historyList.length - 1;
+  }
+
+  const activeText = historyList[historyIndex];
+  
+  // 1. メイン画面出力
+  displayBox.innerText = activeText;
+
+  // 2. G2グラス側へデータ伝達 (Even Realities App / WebSocket / WebBridge)
+  sendToG2Glass(activeText);
 }
 
-function updateGlassesDisplay(text) {
-  if (glassesWindow && !glassesWindow.closed) {
-    const contentDiv = glassesWindow.document.getElementById('content');
-    if (contentDiv) {
-      contentDiv.innerText = text;
-    }
+function sendToG2Glass(text) {
+  // G2側が参照するグローバル変数およびカスタムイベントの発行
+  window.g2DisplayText = text;
+  
+  const event = new CustomEvent('g2UpdateText', { detail: { text: text } });
+  window.dispatchEvent(event);
+
+  // WebSocket等でG2ブリッジと通信している環境への対応
+  if (window.g2Socket && window.g2Socket.readyState === WebSocket.OPEN) {
+    window.g2Socket.send(JSON.stringify({ type: 'display', text: text }));
   }
 }
 
 // ==========================================
-// WAVヘッダー作成ヘルパー関数
+// WAVヘッダー作成
 // ==========================================
 function createWavBlob(pcmChunks, totalBytes) {
   const sampleRate = audioContext.sampleRate;
@@ -269,7 +250,7 @@ function createWavBlob(pcmChunks, totalBytes) {
 }
 
 // ==========================================
-// API通信部 1: Deepgram (文字起こし)
+// API 1: Deepgram (文字起こし)
 // ==========================================
 async function transcribeAudioWithDeepgram(wavBlob) {
   const deepgramKey = document.getElementById('deepgramKey').value.trim();
@@ -292,51 +273,87 @@ async function transcribeAudioWithDeepgram(wavBlob) {
   }
 
   const data = await response.json();
-  const transcript = data.results?.channels[0]?.alternatives[0]?.transcript || '';
-  return transcript.trim();
+  return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
 }
 
 // ==========================================
-// API通信部 2: DeepL (CORSプロキシ対応付き翻訳)
+// API 2: DeepL (翻訳)
 // ==========================================
 async function translateTextWithDeepL(text) {
   const deeplKey = document.getElementById('deeplKey').value.trim();
   if (!deeplKey) return "（DeepL Key未設定のため翻訳省略）";
 
-  const targetEndpoint = deeplKey.endsWith(':fx')
+  const isFree = deeplKey.endsWith(':fx');
+  const endpoint = isFree
     ? 'https://api-free.deepl.com/v2/translate'
     : 'https://api.deepl.com/v2/translate';
 
-  // ブラウザからの直接リクエストによるCORSブロック回避（corsproxy.io利用）
-  const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetEndpoint);
-
-  const params = new URLSearchParams();
-  params.append('auth_key', deeplKey);
-  params.append('text', text);
-  params.append('target_lang', 'JA');
-
   try {
-    const response = await fetch(proxyUrl, {
+    // 直送り試行
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `DeepL-Auth-Key ${deeplKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        text: [text],
+        target_lang: 'JA'
+      })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.translations[0]?.text || '';
+    }
+
+    // CORS制限等で失敗した場合のフォームフォールバック
+    const params = new URLSearchParams();
+    params.append('auth_key', deeplKey);
+    params.append('text', text);
+    params.append('target_lang', 'JA');
+
+    const resForm = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: params
     });
 
-    if (!response.ok) {
-      console.warn("DeepL Error Status:", response.status);
-      return "（DeepL翻訳エラー: Keyの不一致または制限）";
+    if (resForm.ok) {
+      const dataForm = await resForm.json();
+      return dataForm.translations[0]?.text || '';
     }
-
-    const data = await response.json();
-    return data.translations[0]?.text || '';
   } catch (e) {
-    console.error("DeepL Fetch Error:", e);
-    return "（翻訳接続エラー - 通信確認が必要）";
+    console.warn("DeepL Direct Error, trying proxy:", e);
   }
+
+  // プロキシ経由
+  try {
+    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(endpoint);
+    const params = new URLSearchParams();
+    params.append('auth_key', deeplKey);
+    params.append('text', text);
+    params.append('target_lang', 'JA');
+
+    const resProxy = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params
+    });
+
+    if (resProxy.ok) {
+      const dataProxy = await resProxy.json();
+      return dataProxy.translations[0]?.text || '';
+    }
+  } catch(e) {
+    console.error("DeepL Proxy Error:", e);
+  }
+
+  return "（DeepL翻訳エラー: Key確認または制限）";
 }
 
 // ==========================================
-// API通信部 3: OpenAI GPT (返答ヒント生成)
+// API 3: OpenAI (返答ヒント)
 // ==========================================
 async function generateResponseHint(enText) {
   const openAiKey = document.getElementById('apiKey').value.trim();
@@ -374,7 +391,7 @@ async function generateResponseHint(enText) {
 }
 
 // ==========================================
-// 録音の開始とマイク音声処理
+// 録音 & リアルタイム音声処理
 // ==========================================
 async function startRecording() {
   const deepgramKey = document.getElementById('deepgramKey').value.trim();
@@ -465,9 +482,6 @@ function processAudio(e) {
   }
 }
 
-// ==========================================
-// リアルタイム即時認識（プレビュー機能）
-// ==========================================
 async function requestPartialTranscribe() {
   if (isPartialTranscribing || activeTotalBytes < 16000) return;
 
@@ -490,8 +504,8 @@ async function requestPartialTranscribe() {
       } else {
         historyList[currentActiveIndex] = content;
       }
-      await updateDisplays();
-      setStatus(`リアルタイム認識中 (Deepgram): "${partialText}"`);
+      updateDisplays();
+      setStatus(`リアルタイム認識中: "${partialText}"`);
     }
   } catch(e) {
     console.warn("部分認識スルー:", e);
@@ -500,9 +514,6 @@ async function requestPartialTranscribe() {
   }
 }
 
-// ==========================================
-// 全音声確定・翻訳・返答ヒント出力
-// ==========================================
 async function flushAndTranscribe() {
   if (silenceTimer) {
     clearTimeout(silenceTimer);
@@ -530,19 +541,18 @@ async function flushAndTranscribe() {
   currentActiveIndex = -1;
 
   try {
-    setStatus(`全音声確定・Deepgram解析中... (${Math.round(bytesToProcess / 1024)}KB)`);
+    setStatus(`全音声確定・文字起こし中...`);
     const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
     
-    // 1. Deepgramで文字起こし
+    // 1. Deepgram
     const newEnText = await transcribeAudioWithDeepgram(wavBlob);
 
     if (!isNoiseOrFiller(newEnText)) {
-      setStatus(`DeepL翻訳＆返答ヒント生成中...`);
+      setStatus(`翻訳＆返答ヒント生成中...`);
       
-      // 2. DeepLで翻訳
+      // 2. DeepL
       const jaTranslation = await translateTextWithDeepL(newEnText);
 
-      // 画面更新 (ヒント生成待ちの状態)
       let currentContent = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
       
       let targetItemIndex = workingIndex;
@@ -554,22 +564,22 @@ async function flushAndTranscribe() {
         targetItemIndex = historyList.length - 1;
       }
 
-      await updateDisplays();
+      updateDisplays();
 
-      // 3. GPTによる返答ヒント生成
+      // 3. OpenAI GPT
       const hintText = await generateResponseHint(newEnText);
 
-      // 最終表示の確定
+      // 最終更新
       historyList[targetItemIndex] = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n${hintText}`;
-      await updateDisplays();
+      updateDisplays();
       setStatus(`次を待機中... (表示: [${historyIndex + 1}/${historyList.length}])`);
 
     } else {
       if (workingIndex >= 0 && workingIndex < historyList.length) {
         historyList.splice(workingIndex, 1);
-        await updateDisplays();
+        updateDisplays();
       }
-      setStatus(`ノイズ・フィラー除去: "${newEnText}" -> 待機中`);
+      setStatus(`ノイズ除去: "${newEnText}" -> 待機中`);
     }
   } catch (e) {
     console.error(e);
@@ -577,31 +587,6 @@ async function flushAndTranscribe() {
   } finally {
     isProcessing = false;
   }
-}
-
-// ==========================================
-// 履歴＆スマートグラス画面更新制御
-// ==========================================
-async function updateDisplays() {
-  if (historyList.length === 0) {
-    displayBox.innerText = "会話データがありません";
-    updateGlassesDisplay("会話データがありません");
-    return;
-  }
-
-  if (currentActiveIndex !== -1) {
-    historyIndex = currentActiveIndex;
-  } else if (historyIndex === -1 || historyIndex >= historyList.length) {
-    historyIndex = historyList.length - 1;
-  }
-
-  const activeText = historyList[historyIndex];
-  
-  // 1. メインブラウザの画面更新
-  displayBox.innerText = activeText;
-
-  // 2. スマートグラス（Glasses Display）への転送・画面更新
-  updateGlassesDisplay(activeText);
 }
 
 function showPrevHistory() {
