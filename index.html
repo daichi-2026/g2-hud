@@ -157,7 +157,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.4</span>
+      <span class="version-badge" id="versionBadge">v3.5</span>
     </h2>
     <div>
       <label>OpenAI API Key (Whisper/GPT用):</label>
@@ -193,7 +193,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.4 (根本バグ修正・完全手動表示版)";
+    const APP_VERSION = "v3.5 (文頭リアルタイム表示対応版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -205,10 +205,14 @@
     const MAX_PRE_BUFFER = 3;
 
     let isProcessing = false;
+    let isPartialTranscribing = false;
+    let lastPartialBytes = 0;
+    let currentActiveIndex = -1;
+
     let silenceTimer = null;
 
     let historyList = [];
-    let historyIndex = 0; // ユーザーが現在見ているページ番号 (0スタート)
+    let historyIndex = 0;
 
     function getDisplayText() {
       if (historyList.length === 0) {
@@ -217,7 +221,6 @@
           : "タップ操作で音声送信\n（ボタンを押して会話を開始）";
       }
       
-      // ★修正: historyIndexを変えずに、安全な表示用インデックスのみを算出
       let displayIdx = historyIndex;
       if (displayIdx < 0) displayIdx = 0;
       if (displayIdx >= historyList.length) displayIdx = historyList.length - 1;
@@ -313,6 +316,57 @@
       return false;
     }
 
+    // 文頭即時ストリーミング表示用関数
+    async function requestPartialTranscribe() {
+      if (isPartialTranscribing || activeTotalBytes < 16000) return; // 約0.5秒分以上ある場合
+      const apiKey = document.getElementById('apiKey').value.trim();
+      if (!apiKey) return;
+
+      isPartialTranscribing = true;
+      const snapshotChunks = [...activePcmChunks];
+      const snapshotBytes = activeTotalBytes;
+      lastPartialBytes = snapshotBytes;
+
+      try {
+        const wavBlob = createWavBlob(snapshotChunks, snapshotBytes);
+        const formData = new FormData();
+        formData.append('file', wavBlob, 'audio.wav');
+        formData.append('model', 'whisper-1');
+        formData.append('language', 'en');
+        formData.append('temperature', '0');
+
+        const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${apiKey}` },
+          body: formData
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const partialText = data.text ? data.text.trim() : '';
+
+          if (partialText && !isNoiseOrFiller(partialText)) {
+            if (currentActiveIndex === -1) {
+              // 初回先行表示用枠の作成
+              const placeholder = `【相手 (リアルタイム入力中...)】\n${partialText}...\n-------------------\n【返答ヒント】\n（発言終了後に生成されます）`;
+              historyList.push(placeholder);
+              if (historyList.length > 10) historyList.shift();
+              currentActiveIndex = historyList.length - 1;
+            } else {
+              // 枠の更新
+              historyList[currentActiveIndex] = `【相手 (リアルタイム入力中...)】\n${partialText}...\n-------------------\n【返答ヒント】\n（発言終了後に生成されます）`;
+            }
+            await updateDisplays();
+            setStatus(`文頭即時認識中: "${partialText}"`);
+          }
+        }
+      } catch(e) {
+        console.warn("部分認識スルー:", e);
+      } finally {
+        isPartialTranscribing = false;
+      }
+    }
+
     async function flushAndTranscribe() {
       if (silenceTimer) {
         clearTimeout(silenceTimer);
@@ -326,11 +380,13 @@
         setStatus('⚠️ エラー: API Keyを入力してください');
         activePcmChunks = [];
         activeTotalBytes = 0;
+        currentActiveIndex = -1;
         return;
       }
 
       if (activeTotalBytes < 1600) {
         setStatus(`データ不足のためスキップ (${activeTotalBytes} bytes)`);
+        currentActiveIndex = -1;
         return;
       }
 
@@ -340,9 +396,11 @@
       
       activePcmChunks = [];
       activeTotalBytes = 0;
+      const workingIndex = currentActiveIndex;
+      currentActiveIndex = -1;
 
       try {
-        setStatus(`Whisperへ送信中... (${Math.round(bytesToProcess / 1024)}KB)`);
+        setStatus(`全音声確定・Whisper精密解析中... (${Math.round(bytesToProcess / 1024)}KB)`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
         
         const formData = new FormData();
@@ -350,9 +408,6 @@
         formData.append('model', 'whisper-1');
         formData.append('language', 'en');
         formData.append('temperature', '0');
-
-        const promptText = "It's already late August, but it's still so hot. Everyday conversation about weather, greetings, and daily life.";
-        formData.append('prompt', promptText);
 
         const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
           method: 'POST',
@@ -369,7 +424,7 @@
         let newEnText = data.text ? data.text.trim() : '';
 
         if (!isNoiseOrFiller(newEnText)) {
-          setStatus(`相手発言を即時翻訳中...`);
+          setStatus(`全翻訳＆返答ヒント生成中...`);
           let jaTranslation = "";
           try {
             const transResponse = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -394,14 +449,16 @@
 
           let currentContent = `【相手】\n${newEnText}\n${jaTranslation}\n-------------------\n【返答ヒント】\n生成中...`;
           
-          historyList.push(currentContent);
-          if (historyList.length > 10) historyList.shift();
+          let targetItemIndex = workingIndex;
+          if (targetItemIndex >= 0 && targetItemIndex < historyList.length) {
+            historyList[targetItemIndex] = currentContent;
+          } else {
+            historyList.push(currentContent);
+            if (historyList.length > 10) historyList.shift();
+            targetItemIndex = historyList.length - 1;
+          }
 
-          const targetItemIndex = historyList.length - 1;
-
-          // ★ historyIndex は絶対に変更しない（手動のページ固定を死守）
           await updateDisplays();
-          setStatus(`新着履歴追加 [全${historyList.length}件] (現在表示: [${historyIndex + 1}/${historyList.length}])`);
 
           const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
@@ -470,6 +527,10 @@
           setStatus(`次を待機中... (現在表示: [${historyIndex + 1}/${historyList.length}])`);
 
         } else {
+          if (workingIndex >= 0 && workingIndex < historyList.length) {
+            historyList.splice(workingIndex, 1);
+            await updateDisplays();
+          }
           setStatus(`ノイズ除去: "${newEnText}" -> 次を待機中`);
         }
       } catch (e) {
@@ -505,6 +566,11 @@
         activePcmChunks.push(normalized);
         activeTotalBytes += normalized.length;
 
+        // ★文頭即時認識トリガー: データが蓄積されたら喋っている最中でも先行送信
+        if (currentMode === 1 && !isProcessing && (activeTotalBytes - lastPartialBytes > 24000)) {
+          requestPartialTranscribe();
+        }
+
         if (currentMode === 1 && !isProcessing) {
           setStatus(`音声検知中... (${Math.round(activeTotalBytes/1024)}KB) [音量:${Math.round(rms)}]`);
 
@@ -538,7 +604,6 @@
       await sendToG2Display(displayText);
     }
 
-    // 手動ページ送り関数（範囲チェックをここで行う）
     function prevPage() {
       if (historyList.length === 0) return;
       if (historyIndex > 0) {
@@ -561,7 +626,6 @@
       setStatus(`ページ移動: [${historyIndex + 1}/${historyList.length}]`);
     }
 
-    // ボタン直接バインド
     document.getElementById('m1-prev-btn').addEventListener('click', (e) => { e.preventDefault(); prevPage(); });
     document.getElementById('m1-next-btn').addEventListener('click', (e) => { e.preventDefault(); nextPage(); });
     document.getElementById('m2-prev-btn').addEventListener('click', (e) => { e.preventDefault(); prevPage(); });
@@ -573,11 +637,11 @@
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
+      currentActiveIndex = -1;
       await updateDisplays();
       setStatus('履歴をクリアしました');
     };
 
-    // キーボード操作対応 (↑: 前へ / ↓: 次へ)
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -637,7 +701,6 @@
 
           const evt = sysType || textType;
 
-          // スマートグラスのタッチ・フリック操作割り当て
           if (evt === OsEventTypeList.UP_EVENT || evt === OsEventTypeList.SCROLL_UP_EVENT || evt === OsEventTypeList.FLICK_UP_EVENT) {
             prevPage();
           }
