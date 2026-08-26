@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v4.05 Header Fix)</title>
+  <title>EVEN G2 Translator App (v4.06 Direct DeepL Fix)</title>
   <style>
     body {
       background-color: #111;
@@ -163,15 +163,11 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v4.05 Header Fix</span>
+      <span class="version-badge" id="versionBadge">v4.06 Direct Fix</span>
     </h2>
     <div>
-      <label>Cloudflare Worker URL (DeepL経由用):</label>
-      <input type="text" id="workerUrl" value="https://blue-night-af7c.ieoa1000xbd.workers.dev/" placeholder="https://xxx.workers.dev/" style="width:100%; box-sizing:border-box;" />
-    </div>
-    <div>
-      <label>DeepL API Key (フォールバック・Worker認証用):</label>
-      <input type="password" id="deeplKey" placeholder="DeepL Auth Key (...:fx)" style="width:100%; box-sizing:border-box;" />
+      <label>DeepL API Key (文字起こし翻訳用):</label>
+      <input type="password" id="deeplKey" placeholder="DeepL Auth Key (bf05...:fx)" style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -217,7 +213,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v4.05 Header Fix";
+    const APP_VERSION = "v4.06 Direct Fix";
 
     let bridge = null;
     let currentMode = 1;
@@ -373,71 +369,41 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ Worker側が求める Authorization ヘッダーを自動構成
+    // ★ DeepL公式APIへ直接リクエストを送る形へ完全修正
     async function fetchDeeplTranslationAsync(targetIndex, text) {
-      const workerUrl = getInputValue('workerUrl');
       const deeplKey = getInputValue('deeplKey');
-
-      let translatedText = "";
-
-      if (workerUrl) {
-        try {
-          const reqHeaders = { 'Content-Type': 'application/json' };
-          if (deeplKey) {
-            reqHeaders['Authorization'] = `DeepL-Auth-Key ${deeplKey}`;
-          }
-
-          const res = await fetch(workerUrl, {
-            method: 'POST',
-            headers: reqHeaders,
-            body: JSON.stringify({
-              text: text,
-              target_lang: 'JA',
-              auth_key: deeplKey || undefined
-            })
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            translatedText = data.translations?.[0]?.text || data.text || data.result || (typeof data === 'string' ? data : "");
-          } else {
-            const errBody = await res.text();
-            logError("DeepL-Worker", `HTTP ${res.status}`, errBody);
-          }
-        } catch (e) {
-          logError("DeepL-Worker", "通信例外", e.message);
-        }
+      if (!deeplKey) {
+        logError("DeepL", "API Key未入力");
+        return;
       }
 
-      if (!translatedText && deeplKey) {
-        logError("DeepL", "Worker通信失敗のためDirect APIへ切り替え");
-        try {
-          const isFree = deeplKey.endsWith(':fx');
-          const directEndpoint = isFree 
-            ? 'https://api-free.deepl.com/v2/translate' 
-            : 'https://api.deepl.com/v2/translate';
+      let translatedText = "";
+      const isFree = deeplKey.endsWith(':fx');
+      const endpoint = isFree 
+        ? 'https://api-free.deepl.com/v2/translate' 
+        : 'https://api.deepl.com/v2/translate';
 
-          const params = new URLSearchParams();
-          params.append('auth_key', deeplKey);
-          params.append('text', text);
-          params.append('target_lang', 'JA');
+      try {
+        const params = new URLSearchParams();
+        params.append('auth_key', deeplKey);
+        params.append('text', text);
+        params.append('target_lang', 'JA');
 
-          const directRes = await fetch(directEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: params
-          });
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params
+        });
 
-          if (directRes.ok) {
-            const directData = await directRes.json();
-            translatedText = directData.translations?.[0]?.text || "";
-          } else {
-            const errBody = await directRes.text();
-            logError("DeepL-Direct", `HTTP ${directRes.status}`, errBody);
-          }
-        } catch (e) {
-          logError("DeepL-Direct", "Direct API例外", e.message);
+        if (res.ok) {
+          const data = await res.json();
+          translatedText = data.translations?.[0]?.text || "";
+        } else {
+          const errBody = await res.text();
+          logError("DeepL Direct", `HTTP ${res.status}`, errBody);
         }
+      } catch (e) {
+        logError("DeepL Direct", "通信例外", e.message);
       }
 
       if (translatedText && historyList[targetIndex]) {
