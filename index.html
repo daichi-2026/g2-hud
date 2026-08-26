@@ -414,7 +414,7 @@
       }
     }
 
-    // ★ ユーザープロファイル・可変品詞タグ対応 OpenAIヒント生成
+    // ★ 全単語カタカナ出力ルール（ルール3）を追加・最適化したOpenAIヒント生成
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) return;
@@ -445,10 +445,11 @@
    - [副:xxx] : 副詞（程度・強調）
    - [名:xxx] : 名詞（モノ・人・場所・時間）
 2. 置き換えによって前置詞と不整合を起こす表現は避け、他動詞を使用するか熟語セット [動不:xxx for] として一括出力してください。
-3. 全体で改行は極力減らし、コンパクトに30〜40文字程度で出力してください。
+3. 【重要】カタカナ読みは、英文全体の最初から最後までの全単語を省略せずに正確にカタカナ表記してください。
+4. 全体で改行は極力減らし、コンパクトに30〜40文字程度で出力してください。
 
 出力フォーマット例:
-I want to [動可:check] the [名:schedule]. [チェッキング ザ スケジュール] (スケジュールを確認したい)`;
+I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェック ザ スケジュール] (スケジュールを確認したい)`;
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
