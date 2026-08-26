@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.03 Hint Append)</title>
+  <title>EVEN G2 Translator App (v5.04 Hint Pronunciation)</title>
   <style>
     body {
       background-color: #111;
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.03 Append</span>
+      <span class="version-badge" id="versionBadge">v5.04 Ruby</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -213,7 +213,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.03 Append";
+    const APP_VERSION = "v5.04 Ruby";
 
     let bridge = null;
     let currentMode = 1;
@@ -401,17 +401,15 @@
       }
     }
 
-    // ★ 継ぎ足し（Append）方式の返答ヒント生成
+    // ★ カタカナ読み（ルビ）を追加したOpenAIヒント生成
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) return;
 
       const item = historyList[targetIndex];
 
-      // すでに全文章をヒント化したことがある場合はスキップ
       if (item.lastProcessedText === fullText) return;
 
-      // まだヒント化していない「新しく追加された部分脈」を特定
       let textToProcess = fullText;
       if (item.lastProcessedText && fullText.startsWith(item.lastProcessedText)) {
         textToProcess = fullText.slice(item.lastProcessedText.length).trim();
@@ -419,7 +417,7 @@
 
       if (!textToProcess || textToProcess.length < 3) return;
 
-      item.lastProcessedText = fullText; // 処理済みとして記録
+      item.lastProcessedText = fullText;
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -431,11 +429,16 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 120,
+            max_tokens: 150,
             messages: [
               {
                 role: 'system',
-                content: '英会話アシスタントです。相手の発言（または追加フレーズ）に対する簡潔な返答フレーズを英語1文で作成し、直後に（日本語訳）を添えて出力してください。カタカナや前置きは不要です。'
+                content: `英会話アシスタントです。相手の発言（または追加文）に対する自然で簡潔な返答フレーズ（英語1文）を作成し、以下の【出力フォーマット】を厳格に守って出力してください。前置きや挨拶は不要です。
+
+【出力フォーマット】
+英語フレーズ
+[カタカナの読み方（自然な発音）]
+(日本語訳)`
               },
               { role: 'user', content: textToProcess }
             ]
@@ -450,11 +453,10 @@
             if (!historyList[targetIndex].hint) {
               historyList[targetIndex].hint = newHint;
             } else {
-              // 既存のヒントの末尾に、改行と矢印で追加継ぎ足し
               historyList[targetIndex].hint += `\n➜ ${newHint}`;
             }
             await updateDisplays();
-            setStatus('ヒント追記完了');
+            setStatus('ヒント（ルビ付）追記完了');
           }
         }
       } catch (e) {
