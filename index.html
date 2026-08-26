@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v4.06 Direct DeepL Fix)</title>
+  <title>EVEN G2 Translator App (v4.07 Worker Proxy Fix)</title>
   <style>
     body {
       background-color: #111;
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v4.06 Direct Fix</span>
+      <span class="version-badge" id="versionBadge">v4.07 Worker Fix</span>
     </h2>
     <div>
       <label>DeepL API Key (文字起こし翻訳用):</label>
@@ -213,7 +213,8 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v4.06 Direct Fix";
+    const APP_VERSION = "v4.07 Worker Fix";
+    const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev";
 
     let bridge = null;
     let currentMode = 1;
@@ -369,7 +370,7 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ DeepL公式APIへ直接リクエストを送る形へ完全修正
+    // ★ Worker経由でDeepL翻訳を実行
     async function fetchDeeplTranslationAsync(targetIndex, text) {
       const deeplKey = getInputValue('deeplKey');
       if (!deeplKey) {
@@ -378,21 +379,19 @@
       }
 
       let translatedText = "";
-      const isFree = deeplKey.endsWith(':fx');
-      const endpoint = isFree 
-        ? 'https://api-free.deepl.com/v2/translate' 
-        : 'https://api.deepl.com/v2/translate';
 
       try {
-        const params = new URLSearchParams();
-        params.append('auth_key', deeplKey);
-        params.append('text', text);
-        params.append('target_lang', 'JA');
-
-        const res = await fetch(endpoint, {
+        const res = await fetch(WORKER_URL, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `DeepL-Auth-Key ${deeplKey}`
+          },
+          body: JSON.stringify({
+            text: text,
+            target_lang: 'JA',
+            auth_key: deeplKey
+          })
         });
 
         if (res.ok) {
@@ -400,10 +399,10 @@
           translatedText = data.translations?.[0]?.text || "";
         } else {
           const errBody = await res.text();
-          logError("DeepL Direct", `HTTP ${res.status}`, errBody);
+          logError("Worker Proxy", `HTTP ${res.status}`, errBody);
         }
       } catch (e) {
-        logError("DeepL Direct", "通信例外", e.message);
+        logError("Worker Proxy", "通信例外", e.message);
       }
 
       if (translatedText && historyList[targetIndex]) {
