@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v4.02 Robust Async Fix)</title>
+  <title>EVEN G2 Translator App (v4.03 Visible Debug)</title>
   <style>
     body {
       background-color: #111;
@@ -77,16 +77,16 @@
       flex-direction: column;
     }
     .control-panel {
-      width: 400px;
+      width: 420px;
       padding-left: 20px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
       color: #ccc;
-      font-size: 13px;
+      font-size: 12px;
       overflow-y: auto;
     }
-    .control-panel h2 { color: #00FF00; font-size: 16px; margin: 0 0 5px 0; display: flex; align-items: center; justify-content: space-between; }
+    .control-panel h2 { color: #00FF00; font-size: 15px; margin: 0 0 5px 0; display: flex; align-items: center; justify-content: space-between; }
     .version-badge {
       background: #00FF00;
       color: #000;
@@ -99,11 +99,11 @@
       background: #222;
       border: 1px solid #444;
       color: #fff;
-      padding: 6px;
+      padding: 5px;
       border-radius: 4px;
       font-size: 12px;
     }
-    button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 8px; }
+    button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 7px; }
     button:hover { background: #00dd00; color: #000; }
     .nav-btn {
       background: #333;
@@ -114,7 +114,22 @@
       cursor: pointer;
     }
     .nav-btn:hover { background: #00FF00; color: #000; }
-    .status { font-size: 11px; color: #888; white-space: pre-wrap; word-break: break-all; }
+    .status { font-size: 11px; color: #aaa; white-space: pre-wrap; word-break: break-all; }
+
+    /* ★ 可視化ログエリアのスタイル */
+    .error-log-box {
+      background: #080000;
+      border: 1px solid #ff3333;
+      color: #ff6666;
+      font-family: monospace;
+      font-size: 10px;
+      height: 120px;
+      overflow-y: auto;
+      padding: 6px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body tabindex="0">
@@ -149,14 +164,14 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v4.02 Robust</span>
+      <span class="version-badge" id="versionBadge">v4.03 Log</span>
     </h2>
     <div>
       <label>Cloudflare Worker URL (DeepL経由用):</label>
       <input type="text" id="workerUrl" value="https://blue-night-af7c.ieoa1000xbd.workers.dev/" placeholder="https://xxx.workers.dev/" style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
-      <label>DeepL API Key (Worker側で設定済の場合は空欄可/フォールバック用):</label>
+      <label>DeepL API Key (フォールバック用):</label>
       <input type="password" id="deeplKey" placeholder="DeepL Auth Key (任意)" style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
@@ -168,23 +183,31 @@
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
     </div>
     
-    <div>
-      <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">80</span></label>
-      <input type="range" id="noiseThreshold" min="20" max="1000" value="80" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+    <div style="display:flex; gap:10px;">
+      <div style="flex:1;">
+        <label>マイク感度: <span id="thresholdVal">80</span></label>
+        <input type="range" id="noiseThreshold" min="20" max="1000" value="80" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+      </div>
+      <div style="flex:1;">
+        <label>無音タイマー: <span id="silenceSecVal">0.35</span>s</label>
+        <input type="range" id="silenceSec" min="0.1" max="1.0" step="0.05" value="0.35" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      </div>
     </div>
 
-    <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.35</span>秒</label>
-      <input type="range" id="silenceSec" min="0.1" max="1.0" step="0.05" value="0.35" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
-    </div>
-
-    <div style="border-top:1px solid #333; margin:5px 0;"></div>
     <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信 / 強制翻訳実行</button>
-    <button onclick="clearHistory()" style="background:#cc3333; margin-top:5px;">🗑️ 履歴をクリア</button>
+    <button onclick="clearHistory()" style="background:#cc3333;">🗑️ 履歴をクリア</button>
     
-    <div style="border-top:1px solid #333; margin:5px 0;"></div>
-    <div style="font-weight:bold; color:#00FF00;">【ログ・ステータス】</div>
+    <div style="border-top:1px solid #333; margin:2px 0;"></div>
+    
+    <!-- ★ 状態表示 ＆ エラーログ可視化エリア -->
+    <div style="font-weight:bold; color:#00FF00;">【動作ステータス】</div>
     <div id="status" class="status">SDK接続待機中...</div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+      <span style="font-weight:bold; color:#ff6666;">【詳細デバッグ・エラーログ】</span>
+      <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
+    </div>
+    <div id="errorLog" class="error-log-box">[System initialized] エラーログ待機中...</div>
   </div>
 
   <script type="module">
@@ -196,7 +219,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v4.02 (堅牢化ロジック適用版)";
+    const APP_VERSION = "v4.03 (ログ可視化機能追加)";
 
     let bridge = null;
     let currentMode = 1;
@@ -216,6 +239,26 @@
 
     let historyList = [];
     let historyIndex = -1;
+
+    // ★ 画面上のエラーログエリアへ書き込む関数
+    function logError(tag, message, detail = null) {
+      const timeStr = new Date().toLocaleTimeString();
+      const logBox = document.getElementById('errorLog');
+      let msg = `[${timeStr}] [${tag}] ${message}`;
+      if (detail) {
+        if (typeof detail === 'object') {
+          msg += `\n  > Detail: ${JSON.stringify(detail)}`;
+        } else {
+          msg += `\n  > Detail: ${detail}`;
+        }
+      }
+      logBox.innerText = msg + "\n---\n" + logBox.innerText;
+      console.error(`[${tag}]`, message, detail);
+    }
+
+    window.clearErrorLog = function() {
+      document.getElementById('errorLog').innerText = "[Cleared]";
+    };
 
     function getCurrentEnText() {
       if (historyList.length === 0) return "(音声入力待機中...)";
@@ -307,7 +350,10 @@
 
     async function transcribeWithDeepgram(wavBlob) {
       const deepgramKey = document.getElementById('deepgramKey').value.trim();
-      if (!deepgramKey) throw new Error("Deepgram Key未設定");
+      if (!deepgramKey) {
+        logError("Deepgram", "API Keyが入力されていません");
+        throw new Error("Deepgram Key未設定");
+      }
 
       const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true';
       const response = await fetch(url, {
@@ -320,6 +366,8 @@
       });
 
       if (!response.ok) {
+        const errText = await response.text();
+        logError("Deepgram", `HTTP Error ${response.status}`, errText);
         throw new Error(`Deepgram Error (${response.status})`);
       }
 
@@ -327,7 +375,7 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ 1. DeepL 超高速和訳（Worker経由 ＆ 直接通信フォールバック対応）
+    // ★ 1. DeepL 和訳（Worker ＆ 直通信＋詳細ログ）
     async function fetchDeeplTranslationAsync(targetIndex, text) {
       const workerUrl = document.getElementById('workerUrl').value.trim();
       const deeplKey = document.getElementById('deeplKey').value.trim();
@@ -357,15 +405,23 @@
               translatedText = data.result;
             } else if (typeof data === 'string') {
               translatedText = data;
+            } else {
+              logError("DeepL-Worker", "レスポンスに翻訳文字列が見つかりませんでした", data);
             }
+          } else {
+            const errBody = await res.text();
+            logError("DeepL-Worker", `Worker返却エラー (HTTP ${res.status})`, errBody);
           }
         } catch (e) {
-          console.warn("Worker fetch failed, trying direct API if key available:", e);
+          logError("DeepL-Worker", "Worker通信例外発生 (CORS/URL不正等)", e.message);
         }
+      } else {
+        logError("DeepL", "Worker URLが空欄です");
       }
 
-      // B: Worker失敗時またはキー入力時の DeepL Direct API フォールバック
+      // B: Worker失敗時の Direct API フォールバック
       if (!translatedText && deeplKey) {
+        logError("DeepL", "Workerからの取得失敗のため、DeepL Direct APIへフォールバックします");
         try {
           const isFree = deeplKey.endsWith(':fx');
           const directEndpoint = isFree 
@@ -386,9 +442,12 @@
           if (directRes.ok) {
             const directData = await directRes.json();
             translatedText = directData.translations?.[0]?.text || "";
+          } else {
+            const errBody = await directRes.text();
+            logError("DeepL-Direct", `Direct APIエラー (HTTP ${directRes.status})`, errBody);
           }
         } catch (e) {
-          console.error("DeepL Direct Error:", e);
+          logError("DeepL-Direct", "Direct API通信エラー", e.message);
         }
       }
 
@@ -397,14 +456,17 @@
         await updateDisplays();
         setStatus('DeepL和訳表示完了');
       } else {
-        setStatus('DeepL和訳の取得に失敗しました (Worker/Keyを確認してください)');
+        setStatus('DeepL和訳の取得に失敗（ログ参照）');
       }
     }
 
     // ★ 2. OpenAI 返答ヒント生成
     async function fetchOpenAiHintAsync(targetIndex, text) {
       const openAiKey = document.getElementById('apiKey').value.trim();
-      if (!openAiKey) return;
+      if (!openAiKey) {
+        logError("OpenAI", "API Key未入力のためヒント生成をスキップします");
+        return;
+      }
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -440,9 +502,12 @@
             await updateDisplays();
             setStatus('返答ヒント表示完了');
           }
+        } else {
+          const errBody = await res.text();
+          logError("OpenAI", `HTTPエラー (${res.status})`, errBody);
         }
       } catch (e) {
-        console.error("OpenAI Error:", e);
+        logError("OpenAI", "通信エラー", e.message);
       }
     }
 
@@ -500,13 +565,12 @@
             setStatus('英語更新完了');
           }
         } else if (historyList.length > 0) {
-          // 強制送信時に音声バッファがない場合は現在の履歴を対象にする
           targetIndex = historyIndex;
           targetText = historyList[targetIndex].en;
         }
       } catch (e) {
-        console.error(e);
-        setStatus('文字起こしエラー: ' + e.message);
+        logError("Transcribe", "文字起こし例外", e.message);
+        setStatus('文字起こしエラー');
       } finally {
         isProcessing = false;
         
@@ -580,7 +644,7 @@
             content: jaText,
           }));
         } catch (e) {
-          console.error("Display upgrade failed:", e);
+          logError("SDK Display", "Glasses描画アップグレード失敗", e.message);
         }
       }
     }
@@ -688,6 +752,7 @@
         });
 
       } catch (e) {
+        logError("SDK Init", "Glasses SDK初期化失敗", e.message);
         setStatus("接続エラー: " + e.message);
       }
     }
@@ -713,9 +778,8 @@
       updateDisplays();
     };
 
-    // ★ 強制実行ボタン（ロック解除＋強制送信）
     window.forceSendPTT = function() {
-      isProcessing = false; // ロック強制解除
+      isProcessing = false;
       processQueue(true, true);
     };
 
