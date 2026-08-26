@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v4.04 Final Fix)</title>
+  <title>EVEN G2 Translator App (v4.05 Header Fix)</title>
   <style>
     body {
       background-color: #111;
@@ -163,15 +163,15 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v4.04 Fix</span>
+      <span class="version-badge" id="versionBadge">v4.05 Header Fix</span>
     </h2>
     <div>
       <label>Cloudflare Worker URL (DeepL経由用):</label>
       <input type="text" id="workerUrl" value="https://blue-night-af7c.ieoa1000xbd.workers.dev/" placeholder="https://xxx.workers.dev/" style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
-      <label>DeepL API Key (フォールバック用):</label>
-      <input type="password" id="deeplKey" placeholder="DeepL Auth Key (任意)" style="width:100%; box-sizing:border-box;" />
+      <label>DeepL API Key (フォールバック・Worker認証用):</label>
+      <input type="password" id="deeplKey" placeholder="DeepL Auth Key (...:fx)" style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -217,7 +217,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v4.04 (キー参照・判定改善版)";
+    const APP_VERSION = "v4.05 Header Fix";
 
     let bridge = null;
     let currentMode = 1;
@@ -373,6 +373,7 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
+    // ★ Worker側が求める Authorization ヘッダーを自動構成
     async function fetchDeeplTranslationAsync(targetIndex, text) {
       const workerUrl = getInputValue('workerUrl');
       const deeplKey = getInputValue('deeplKey');
@@ -381,9 +382,14 @@
 
       if (workerUrl) {
         try {
+          const reqHeaders = { 'Content-Type': 'application/json' };
+          if (deeplKey) {
+            reqHeaders['Authorization'] = `DeepL-Auth-Key ${deeplKey}`;
+          }
+
           const res = await fetch(workerUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: reqHeaders,
             body: JSON.stringify({
               text: text,
               target_lang: 'JA',
@@ -552,14 +558,12 @@
           targetText = historyList[targetIndex].en;
         }
       } catch (e) {
-        // 音声認識側で一時的なエラーがあっても既存の英語テキストがあればそれを翻訳対象にする
         if (historyList.length > 0) {
           targetIndex = historyIndex;
           targetText = historyList[targetIndex].en;
         }
       } finally {
         isProcessing = false;
-        // isFinal, isForce, またはテキストが存在すれば必ずDeepL/OpenAIを実行
         if (targetIndex >= 0 && targetText && (isFinal || isForce || currentMode === 1)) {
           triggerParallelProcessing(targetIndex, targetText);
         }
