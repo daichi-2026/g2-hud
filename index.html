@@ -411,7 +411,7 @@
       }
     }
 
-    // ★ 速度最適化版 OpenAI ヒント生成（gpt-4o-mini + 最短プロンプト）
+    // ★ トークン数を拡張(150)し、英語・カタカナ・日本語訳を最後まで出力させる修正版
     async function fetchOpenAiHintAsync(targetIndex, text) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey) {
@@ -427,13 +427,13 @@
             'Authorization': `Bearer ${openAiKey}`
           },
           body: JSON.stringify({
-            model: 'gpt-4o-mini', // 爆速モデルに変更
+            model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 60,       // 文字数を最小限に絞り応答時間を削る
+            max_tokens: 150, // 途切れ防止のため 60 -> 150 に拡大
             messages: [
               {
                 role: 'system',
-                content: '会話アシスタントです。相手の発言に対する自然な返答フレーズを英語で1つだけ、カタカナの読みと日本語訳を添えて最短で出力してください。挨拶や前置き、解説は一切不要です。'
+                content: '英会話アシスタントです。相手の発言に対する簡潔な返答フレーズを英語で1文だけ作成し、続けて（）内にカタカナ読みと日本語訳を添えて出力してください。前置きや解説は一切不要です。'
               },
               { role: 'user', content: text }
             ]
