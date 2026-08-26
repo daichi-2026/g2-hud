@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v4.07 Worker Proxy Fix)</title>
+  <title>EVEN G2 Translator App (v4.07 Full Fix)</title>
   <style>
     body {
       background-color: #111;
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v4.07 Worker Fix</span>
+      <span class="version-badge" id="versionBadge">v4.07 Full Fix</span>
     </h2>
     <div>
       <label>DeepL API Key (文字起こし翻訳用):</label>
@@ -213,7 +213,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v4.07 Worker Fix";
+    const APP_VERSION = "v4.07 Full Fix";
     const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev";
 
     let bridge = null;
@@ -370,17 +370,22 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ Worker経由でDeepL翻訳を実行
+    // ★ 修正版: 確実にキー判定し、Worker通信ログを全て表示する処理
     async function fetchDeeplTranslationAsync(targetIndex, text) {
-      const deeplKey = getInputValue('deeplKey');
+      const rawKey = document.getElementById('deeplKey')?.value || "";
+      const deeplKey = rawKey.trim();
+
+      logError("DeepL Check", `キー判定: len=${deeplKey.length}, val=${deeplKey.substring(0, 5)}...`);
+
       if (!deeplKey) {
-        logError("DeepL", "API Key未入力");
+        logError("DeepL Error", "画面の DeepL API Key 欄が空欄です");
         return;
       }
 
       let translatedText = "";
 
       try {
+        logError("Worker Send", "Workerへリクエスト送信開始...");
         const res = await fetch(WORKER_URL, {
           method: 'POST',
           headers: {
@@ -394,22 +399,24 @@
           })
         });
 
+        logError("Worker Response", `Status: ${res.status}`);
+
         if (res.ok) {
           const data = await res.json();
           translatedText = data.translations?.[0]?.text || "";
         } else {
           const errBody = await res.text();
-          logError("Worker Proxy", `HTTP ${res.status}`, errBody);
+          logError("Worker Error", `HTTP ${res.status}`, errBody);
         }
       } catch (e) {
-        logError("Worker Proxy", "通信例外", e.message);
+        logError("Worker Exception", "通信例外", e.message);
       }
 
       if (translatedText && historyList[targetIndex]) {
         historyList[targetIndex].ja = translatedText;
         await updateDisplays();
         setStatus('DeepL和訳表示完了');
-        logError("DeepL", "和訳成功: " + translatedText);
+        logError("DeepL Success", "和訳成功: " + translatedText);
       } else {
         setStatus('DeepL和訳取得失敗');
       }
