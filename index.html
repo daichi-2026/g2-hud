@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v4.07 Full Fix)</title>
+  <title>EVEN G2 Translator App (v4.08 Worker Debug)</title>
   <style>
     body {
       background-color: #111;
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v4.07 Full Fix</span>
+      <span class="version-badge" id="versionBadge">v4.08 Timeout Fix</span>
     </h2>
     <div>
       <label>DeepL API Key (文字起こし翻訳用):</label>
@@ -213,7 +213,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v4.07 Full Fix";
+    const APP_VERSION = "v4.08 Timeout Fix";
     const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev";
 
     let bridge = null;
@@ -370,12 +370,12 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ 修正版: 確実にキー判定し、Worker通信ログを全て表示する処理
+    // ★ v4.08: 5秒タイムアウト判定＆詳細エラーログ機能を追加
     async function fetchDeeplTranslationAsync(targetIndex, text) {
       const rawKey = document.getElementById('deeplKey')?.value || "";
       const deeplKey = rawKey.trim();
 
-      logError("DeepL Check", `キー判定: len=${deeplKey.length}, val=${deeplKey.substring(0, 5)}...`);
+      logError("DeepL Check", `キー判定: len=${deeplKey.length}`);
 
       if (!deeplKey) {
         logError("DeepL Error", "画面の DeepL API Key 欄が空欄です");
@@ -383,22 +383,26 @@
       }
 
       let translatedText = "";
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒で強制中断
 
       try {
-        logError("Worker Send", "Workerへリクエスト送信開始...");
+        logError("Worker Send", "Workerへ通信開始 (5秒タイムアウト設定)...");
+        
         const res = await fetch(WORKER_URL, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `DeepL-Auth-Key ${deeplKey}`
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             text: text,
             target_lang: 'JA',
             auth_key: deeplKey
-          })
+          }),
+          signal: controller.signal
         });
 
+        clearTimeout(timeoutId);
         logError("Worker Response", `Status: ${res.status}`);
 
         if (res.ok) {
@@ -409,7 +413,12 @@
           logError("Worker Error", `HTTP ${res.status}`, errBody);
         }
       } catch (e) {
-        logError("Worker Exception", "通信例外", e.message);
+        clearTimeout(timeoutId);
+        if (e.name === 'AbortError') {
+          logError("Worker Timeout", "通信が5秒間応答せずタイムアウトしました。CORS拒否またはWorkerの障害です。");
+        } else {
+          logError("Worker Fail", "通信エラー発生", e.message || String(e));
+        }
       }
 
       if (translatedText && historyList[targetIndex]) {
