@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.04 Hint Pronunciation)</title>
+  <title>EVEN G2 Translator App (v5.05 Speed Restore)</title>
   <style>
     body {
       background-color: #111;
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.04 Ruby</span>
+      <span class="version-badge" id="versionBadge">v5.05 Speed</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -213,7 +213,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.04 Ruby";
+    const APP_VERSION = "v5.05 Speed";
 
     let bridge = null;
     let currentMode = 1;
@@ -401,7 +401,7 @@
       }
     }
 
-    // ★ カタカナ読み（ルビ）を追加したOpenAIヒント生成
+    // ★ 高速化＆文字数制限を厳正化したコンパクトルビヒント生成
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) return;
@@ -429,16 +429,11 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 150,
+            max_tokens: 80,
             messages: [
               {
                 role: 'system',
-                content: `英会話アシスタントです。相手の発言（または追加文）に対する自然で簡潔な返答フレーズ（英語1文）を作成し、以下の【出力フォーマット】を厳格に守って出力してください。前置きや挨拶は不要です。
-
-【出力フォーマット】
-英語フレーズ
-[カタカナの読み方（自然な発音）]
-(日本語訳)`
+                content: '英会話アシスタントです。相手の発言（または追加文）に対し、極めて簡潔な返答英文（1文）とカタカナ読み、日本語訳を出力してください。改行は極力使わず、全幅で30文字程度に収めてください。\n例: Yeah! [イエス] (そうですね)'
               },
               { role: 'user', content: textToProcess }
             ]
@@ -456,7 +451,7 @@
               historyList[targetIndex].hint += `\n➜ ${newHint}`;
             }
             await updateDisplays();
-            setStatus('ヒント（ルビ付）追記完了');
+            setStatus('ヒント追記完了');
           }
         }
       } catch (e) {
@@ -578,11 +573,15 @@
     }
 
     async function updateDisplays() {
-      const enText = getCurrentEnText();
-      const jaText = getCurrentJaText();
+      let enText = getCurrentEnText();
+      let jaText = getCurrentJaText();
 
       document.getElementById('preview-en').innerText = enText;
       document.getElementById('preview-ja').innerText = jaText;
+
+      // SDK文字数上限（安全値）でのトリミング処理
+      if (enText.length > 300) enText = enText.slice(-300);
+      if (jaText.length > 400) jaText = jaText.slice(-400);
 
       if (bridge) {
         try {
