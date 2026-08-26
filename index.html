@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v4.08 Worker Debug)</title>
+  <title>EVEN G2 Translator App (v5.00 Google Translate Direct)</title>
   <style>
     body {
       background-color: #111;
@@ -118,8 +118,8 @@
 
     .error-log-box {
       background: #080000;
-      border: 1px solid #ff3333;
-      color: #ff6666;
+      border: 1px solid #33ff33;
+      color: #66ff66;
       font-family: monospace;
       font-size: 10px;
       height: 120px;
@@ -153,7 +153,7 @@
           <div id="preview-en" style="color:#00FF00; font-size:11px; font-weight:bold; overflow-y:auto; flex:1; white-space:pre-wrap;">(音声待機中...)</div>
         </div>
         <div class="preview-box" style="height: 135px;">
-          <div style="font-size:9px; color:#888;">【日本語訳 (DeepL) ＆ 返答ヒント (OpenAI)】</div>
+          <div style="font-size:9px; color:#888;">【日本語訳 (Google Translate) ＆ 返答ヒント (OpenAI)】</div>
           <div id="preview-ja" style="color:#fff; font-size:11px; overflow-y:auto; flex:1; white-space:pre-wrap;">(翻訳待機中...)</div>
         </div>
       </div>
@@ -163,11 +163,11 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v4.08 Timeout Fix</span>
+      <span class="version-badge" id="versionBadge">v5.00 Google Direct</span>
     </h2>
     <div>
-      <label>DeepL API Key (文字起こし翻訳用):</label>
-      <input type="password" id="deeplKey" placeholder="DeepL Auth Key (bf05...:fx)" style="width:100%; box-sizing:border-box;" />
+      <label>Google Translate API Key (和訳用):</label>
+      <input type="password" id="googleKey" placeholder="AIzaSy..." style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -198,7 +198,7 @@
     <div id="status" class="status">SDK接続待機中...</div>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-      <span style="font-weight:bold; color:#ff6666;">【詳細デバッグ・エラーログ】</span>
+      <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
     <div id="errorLog" class="error-log-box">[System initialized] ログ待機中...</div>
@@ -213,8 +213,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v4.08 Timeout Fix";
-    const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev";
+    const APP_VERSION = "v5.00 Google Direct";
 
     let bridge = null;
     let currentMode = 1;
@@ -264,7 +263,7 @@
     function getCurrentJaText() {
       if (historyList.length === 0) return "(翻訳・ヒント待機中...)";
       const item = historyList[historyIndex];
-      const ja = item.ja ? `【訳】${item.ja}` : "【訳】（DeepL翻訳中...）";
+      const ja = item.ja ? `【訳】${item.ja}` : "【訳】（Google翻訳中...）";
       const hint = item.hint ? `【ヒント】\n${item.hint}` : "【ヒント】（AI思考中...）";
       return `${ja}\n-------------------\n${hint}`;
     }
@@ -370,64 +369,46 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ v4.08: 5秒タイムアウト判定＆詳細エラーログ機能を追加
-    async function fetchDeeplTranslationAsync(targetIndex, text) {
-      const rawKey = document.getElementById('deeplKey')?.value || "";
-      const deeplKey = rawKey.trim();
-
-      logError("DeepL Check", `キー判定: len=${deeplKey.length}`);
-
-      if (!deeplKey) {
-        logError("DeepL Error", "画面の DeepL API Key 欄が空欄です");
+    // ★ Google Translate API 直接呼び出し（Worker不要）
+    async function fetchGoogleTranslationAsync(targetIndex, text) {
+      const googleKey = getInputValue('googleKey');
+      if (!googleKey) {
+        logError("Google Translate", "API Key未入力");
         return;
       }
 
-      let translatedText = "";
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒で強制中断
-
       try {
-        logError("Worker Send", "Workerへ通信開始 (5秒タイムアウト設定)...");
+        logError("Google Translate", "直接APIリクエスト送信中...");
+        const url = `https://translation.googleapis.com/language/translate/v2?key=${googleKey}`;
         
-        const res = await fetch(WORKER_URL, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            text: text,
-            target_lang: 'JA',
-            auth_key: deeplKey
-          }),
-          signal: controller.signal
+            q: text,
+            target: 'ja',
+            format: 'text'
+          })
         });
 
-        clearTimeout(timeoutId);
-        logError("Worker Response", `Status: ${res.status}`);
+        if (response.ok) {
+          const data = await response.json();
+          const translatedText = data.data?.translations[0]?.translatedText || "";
 
-        if (res.ok) {
-          const data = await res.json();
-          translatedText = data.translations?.[0]?.text || "";
+          if (translatedText && historyList[targetIndex]) {
+            historyList[targetIndex].ja = translatedText;
+            await updateDisplays();
+            setStatus('Google和訳表示完了');
+            logError("Google Translate", "和訳成功: " + translatedText);
+          }
         } else {
-          const errBody = await res.text();
-          logError("Worker Error", `HTTP ${res.status}`, errBody);
+          const errText = await response.text();
+          logError("Google Translate", `HTTP Error ${response.status}`, errText);
         }
       } catch (e) {
-        clearTimeout(timeoutId);
-        if (e.name === 'AbortError') {
-          logError("Worker Timeout", "通信が5秒間応答せずタイムアウトしました。CORS拒否またはWorkerの障害です。");
-        } else {
-          logError("Worker Fail", "通信エラー発生", e.message || String(e));
-        }
-      }
-
-      if (translatedText && historyList[targetIndex]) {
-        historyList[targetIndex].ja = translatedText;
-        await updateDisplays();
-        setStatus('DeepL和訳表示完了');
-        logError("DeepL Success", "和訳成功: " + translatedText);
-      } else {
-        setStatus('DeepL和訳取得失敗');
+        logError("Google Translate", "通信エラー発生", e.message);
       }
     }
 
@@ -485,7 +466,7 @@
     function triggerParallelProcessing(targetIndex, text) {
       setStatus(`和訳・ヒント処理実行中...`);
       logError("Trigger", "並列処理開始: " + text);
-      fetchDeeplTranslationAsync(targetIndex, text);
+      fetchGoogleTranslationAsync(targetIndex, text);
       fetchOpenAiHintAsync(targetIndex, text);
     }
 
