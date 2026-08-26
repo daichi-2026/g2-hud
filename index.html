@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v3.62 Fixed)</title>
+  <title>EVEN G2 Translator App (v3.63 Fast Render)</title>
   <style>
     body {
       background-color: #111;
@@ -158,7 +158,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.62 (修正版)</span>
+      <span class="version-badge" id="versionBadge">v3.63 (非同期高速版)</span>
     </h2>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -202,7 +202,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.62 (修正版)";
+    const APP_VERSION = "v3.63 (非同期高速版)";
     const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev/";
 
     let bridge = null;
@@ -218,9 +218,9 @@
     let silenceTimer = null;
 
     let currentEnSession = [];
-    let currentJaSession = [];
     let sessionLastTime = 0;
 
+    // 画面管理用データ構造
     let historyList = [];
     let historyIndex = -1;
 
@@ -232,7 +232,13 @@
       }
       const item = historyList[historyIndex];
       const navInfo = `[${historyIndex + 1}/${historyList.length}] -------------------\n`;
-      return navInfo + item;
+      return navInfo + formatSessionItem(item);
+    }
+
+    function formatSessionItem(item) {
+      const jaText = item.ja || "（翻訳中...）";
+      const hintText = item.hint || "（準備中...）";
+      return `【相手】\n${item.en}\n${jaText}\n-------------------\n【返答ヒント】\n${hintText}`;
     }
 
     function normalizePcm(pcmData) {
@@ -331,16 +337,17 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    async function translateTextSafe(text) {
+    // バックグラウンドでDeepL翻訳を実行
+    async function fetchTranslationAsync(targetIndex, fullEnText) {
       const deeplKey = document.getElementById('deeplKey').value.trim();
-      if (!deeplKey) return null;
+      if (!deeplKey) return;
 
       try {
         const response = await fetch(WORKER_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: text,
+            text: fullEnText,
             target_lang: 'JA',
             auth_key: deeplKey
           })
@@ -348,19 +355,27 @@
 
         if (response.ok) {
           const data = await response.json();
-          if (data.translations && data.translations[0]) {
-            return data.translations[0].text;
+          const translatedText = data.translations?.[0]?.text;
+          if (translatedText && historyList[targetIndex]) {
+            historyList[targetIndex].ja = translatedText;
+            await updateDisplays();
           }
         }
       } catch (e) {
-        console.warn("Workers DeepL Failed:", e);
+        console.warn("DeepL Async Error:", e);
       }
-      return null;
     }
 
-    async function generateOpenAiHintAsync(targetIndex, fullEnText, fullJaText) {
+    // バックグラウンドでOpenAIヒントを生成
+    async function fetchOpenAiHintAsync(targetIndex, fullEnText) {
       const openAiKey = document.getElementById('apiKey').value.trim();
-      if (!openAiKey) return;
+      if (!openAiKey) {
+        if (historyList[targetIndex]) {
+          historyList[targetIndex].hint = "（OpenAI Key未設定）";
+          await updateDisplays();
+        }
+        return;
+      }
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -386,14 +401,13 @@
         if (res.ok) {
           const data = await res.json();
           const hintText = data.choices[0]?.message?.content?.trim() || "";
-          
-          if (historyList[targetIndex]) {
-            historyList[targetIndex] = `【相手】\n${fullEnText}\n${fullJaText}\n-------------------\n【返答ヒント】\n${hintText}`;
+          if (hintText && historyList[targetIndex]) {
+            historyList[targetIndex].hint = hintText;
             await updateDisplays();
           }
         }
       } catch (e) {
-        console.error("Async OpenAI Error:", e);
+        console.error("OpenAI Async Error:", e);
       }
     }
 
@@ -425,33 +439,31 @@
           sessionLastTime = now;
 
           const fullEn = currentEnSession.join(' ');
-          
-          // 英文全体をDeepLに翻訳させる
-          const jaTranslation = await translateTextSafe(fullEn);
-          if (jaTranslation) {
-            currentJaSession = [jaTranslation];
-          }
 
-          const fullJa = currentJaSession.length > 0 ? currentJaSession.join(' ') : "（翻訳処理中...）";
-          const openAiKey = document.getElementById('apiKey').value.trim();
-          const hintLabel = openAiKey ? "（準備中...）" : "（OpenAI Key未設定）";
-
-          let currentContent = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n${hintLabel}`;
+          const newItem = {
+            en: fullEn,
+            ja: "（翻訳中...）",
+            hint: "（準備中...）"
+          };
 
           if (isNewSession || historyList.length === 0) {
-            historyList.push(currentContent);
+            historyList.push(newItem);
           } else {
-            historyList[historyList.length - 1] = currentContent;
+            // 既存セッションの英文更新（過去の翻訳・ヒントは一旦リセットして再取得）
+            historyList[historyList.length - 1].en = fullEn;
+            historyList[historyList.length - 1].ja = "（翻訳中...）";
+            historyList[historyList.length - 1].hint = "（準備中...）";
           }
           historyIndex = historyList.length - 1;
 
+          // ★最速処理：英文のみで画面を速攻アップデート
           await updateDisplays();
           setStatus('待機中');
 
-          // 非同期で返答ヒント生成をバックグラウンド実行
-          if (openAiKey) {
-            generateOpenAiHintAsync(historyIndex, fullEn, fullJa);
-          }
+          // バックグラウンドで翻訳とヒント生成を並列スタート
+          const targetIdx = historyIndex;
+          fetchTranslationAsync(targetIdx, fullEn);
+          fetchOpenAiHintAsync(targetIdx, fullEn);
 
         } else {
           setStatus(`待機中`);
@@ -527,7 +539,6 @@
       historyList = [];
       historyIndex = -1;
       currentEnSession = [];
-      currentJaSession = [];
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
