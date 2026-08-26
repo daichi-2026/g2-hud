@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v3.66 Ultra Stream)</title>
+  <title>EVEN G2 Translator App (v3.67 Direct Fix)</title>
   <style>
     body {
       background-color: #111;
@@ -140,7 +140,7 @@
           <div style="font-size:9px; color:#888;">【相手の英語】</div>
           <div id="preview-en" style="color:#00FF00; font-size:11px; font-weight:bold; overflow-y:auto; flex:1; white-space:pre-wrap;">(音声待機中...)</div>
         </div>
-        <!-- 下段：日本語訳・ヒント枠プレビュー -->
+        <!-- 下段：日本語訳 ＆ ヒント枠プレビュー -->
         <div class="preview-box" style="height: 135px;">
           <div style="font-size:9px; color:#888;">【日本語訳 ＆ 返答ヒント】</div>
           <div id="preview-ja" style="color:#fff; font-size:11px; overflow-y:auto; flex:1; white-space:pre-wrap;">(翻訳待機中...)</div>
@@ -152,7 +152,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.66 (頭切れ防止・順次追記)</span>
+      <span class="version-badge" id="versionBadge">v3.67 (翻訳確実発動版)</span>
     </h2>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -175,7 +175,7 @@
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
-    <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信（画面2用）</button>
+    <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信 / 強制翻訳実行</button>
     <button onclick="clearHistory()" style="background:#cc3333; margin-top:5px;">🗑️ 履歴をクリア</button>
     
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -192,7 +192,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.66 (頭切れ防止・順次追記)";
+    const APP_VERSION = "v3.67 (翻訳確実発動版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -200,7 +200,6 @@
     let activePcmChunks = [];
     let activeTotalBytes = 0;
     
-    // ★冒頭音切れ対策：リングバッファを拡大（過去約0.5秒分の音声を常時保持）
     let preRingBuffer = [];
     const MAX_PRE_BUFFER = 25; 
 
@@ -306,8 +305,7 @@
       const deepgramKey = document.getElementById('deepgramKey').value.trim();
       if (!deepgramKey) throw new Error("Deepgram Key未設定");
 
-      // 高精度かつ高速なnova-2会話向けパラメータ
-      const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true&utterance_end_ms=1000';
+      const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true';
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -325,9 +323,15 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
+    // ★ OpenAI 翻訳＆ヒント生成（確実に呼び出してログ表示）
     async function processAiTranslateAndHintAsync(targetIndex, fullEnText) {
       const openAiKey = document.getElementById('apiKey').value.trim();
-      if (!openAiKey) return;
+      if (!openAiKey) {
+        setStatus("エラー: OpenAI API Keyが入力されていません");
+        return;
+      }
+
+      setStatus(`OpenAI翻訳・ヒント生成中... (${fullEnText.substring(0, 20)}...)`);
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -339,11 +343,11 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.2,
-            max_tokens: 180,
+            max_tokens: 200,
             messages: [
               {
                 role: 'system',
-                content: `入力された英語に対し、以下のフォーマット厳守で出力してください。余計な解説は不要です。
+                content: `入力された英語に対し、以下のフォーマット厳守で出力してください。余計な解説や前置きは一切不要です。
 
 【日本語訳】
 (相手の発言の自然な日本語訳)
@@ -358,21 +362,30 @@
           })
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          const content = data.choices[0]?.message?.content?.trim() || "";
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(`OpenAI API Error ${res.status}: ${errData.error?.message || ''}`);
+        }
 
-          const jaMatch = content.match(/【日本語訳】\n([\s\S]*?)(?=\n【返答ヒント】|$)/);
-          const hintMatch = content.match(/【返答ヒント】\n([\s\S]*)$/);
+        const data = await res.json();
+        const content = data.choices[0]?.message?.content?.trim() || "";
 
-          if (historyList[targetIndex]) {
-            if (jaMatch && jaMatch[1]) historyList[targetIndex].ja = jaMatch[1].trim();
-            if (hintMatch && hintMatch[1]) historyList[targetIndex].hint = hintMatch[1].trim();
-            await updateDisplays();
-          }
+        const jaMatch = content.match(/【日本語訳】\n([\s\S]*?)(?=\n【返答ヒント】|$)/);
+        const hintMatch = content.match(/【返答ヒント】\n([\s\S]*)$/);
+
+        if (historyList[targetIndex]) {
+          historyList[targetIndex].ja = jaMatch && jaMatch[1] ? jaMatch[1].trim() : content;
+          historyList[targetIndex].hint = hintMatch && hintMatch[1] ? hintMatch[1].trim() : "";
+          await updateDisplays();
+          setStatus('AI翻訳・ヒント表示完了');
         }
       } catch (e) {
         console.error("OpenAI Error:", e);
+        setStatus(`OpenAI失敗: ${e.message}`);
+        if (historyList[targetIndex]) {
+          historyList[targetIndex].ja = `(翻訳エラー: ${e.message})`;
+          await updateDisplays();
+        }
       }
     }
 
@@ -389,6 +402,8 @@
         activeTotalBytes = 0;
       }
 
+      let currentTargetIndex = historyIndex;
+
       try {
         setStatus(`文字起こし中...`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
@@ -401,7 +416,7 @@
           if (isNewSession) {
             currentEnSession = [enText];
           } else {
-            currentEnSession[currentEnSession.length - 1] = enText; // リアルタイム上書き・追記
+            currentEnSession[currentEnSession.length - 1] = enText;
           }
           sessionLastTime = now;
 
@@ -415,33 +430,30 @@
             historyList[historyList.length - 1].en = fullEn;
           }
           historyIndex = historyList.length - 1;
+          currentTargetIndex = historyIndex;
 
-          // ★英語のみ即時枠更新（次々に送信）
           await updateDisplays();
           setStatus('文字起こし完了');
-
-          // 文末・一連の発言が終わったタイミングでAI翻訳を発動
-          if (isFinal) {
-            processAiTranslateAndHintAsync(historyIndex, fullEn);
-          }
-        } else {
-          setStatus(`待機中`);
         }
       } catch (e) {
         console.error(e);
-        setStatus('エラー: ' + e.message);
+        setStatus('文字起こしエラー: ' + e.message);
       } finally {
         isProcessing = false;
+        
+        // ★修正ポイント: 発話終了(isFinal)のタイミングで、最新の英語文に対して確実にOpenAIを呼ぶ
+        if (isFinal && historyList.length > 0 && currentTargetIndex >= 0) {
+          const targetEn = historyList[currentTargetIndex].en;
+          processAiTranslateAndHintAsync(currentTargetIndex, targetEn);
+        }
       }
     }
 
     function handleAudioData(normalized) {
       const rms = calculateRMS(normalized);
-      // 感度閾値を下げる（デフォルト80）
       const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 80;
 
       if (rms >= threshold) {
-        // 音声を感知した瞬間に過去0.5秒の事前バッファ（It's等）を一気に結合
         if (activePcmChunks.length === 0 && preRingBuffer.length > 0) {
           for (const preChunk of preRingBuffer) {
             activePcmChunks.push(preChunk);
@@ -456,7 +468,6 @@
         if (currentMode === 1) {
           setStatus(`音声検出中...`);
 
-          // 途中で細かくDeepgramを呼んで英語枠へ次々流し込む（300ms間隔）
           if (!chunkTimer) {
             chunkTimer = setTimeout(() => {
               chunkTimer = null;
@@ -468,7 +479,7 @@
           const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 350;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1) {
-              processQueue(true); // 話し終わり（翻訳実行）
+              processQueue(true); // ★話し終わり時に isFinal=true で呼び出し
             }
           }, silenceMs);
         }
@@ -636,9 +647,6 @@
     };
 
     window.forceSendPTT = function() {
-      if (currentMode !== 2) {
-        window.switchMode(2);
-      }
       processQueue(true);
     };
 
