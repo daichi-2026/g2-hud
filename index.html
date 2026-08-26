@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v4.00 Progressive Async Render)</title>
+  <title>EVEN G2 Translator App (v4.02 Robust Async Fix)</title>
   <style>
     body {
       background-color: #111;
@@ -125,7 +125,6 @@
       <div id="tab2" class="mode-tab" onclick="switchMode(2)">2: PTT (押して送信)</div>
     </div>
 
-    <!-- グラスプレビュー画面 -->
     <div id="glass-display">
       <div id="mode1Screen" class="hud-mode-screen active" style="height:100%; flex-direction:column; gap:4px;">
         <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px;">
@@ -135,12 +134,10 @@
             <button class="nav-btn" onclick="navigateHistory('down')">▼次</button>
           </div>
         </div>
-        <!-- 上段：英語枠プレビュー -->
         <div class="preview-box" style="height: 115px;">
           <div style="font-size:9px; color:#888;">【相手の英語 (Deepgram)】</div>
           <div id="preview-en" style="color:#00FF00; font-size:11px; font-weight:bold; overflow-y:auto; flex:1; white-space:pre-wrap;">(音声待機中...)</div>
         </div>
-        <!-- 下段：日本語訳 ＆ ヒント枠プレビュー -->
         <div class="preview-box" style="height: 135px;">
           <div style="font-size:9px; color:#888;">【日本語訳 (DeepL) ＆ 返答ヒント (OpenAI)】</div>
           <div id="preview-ja" style="color:#fff; font-size:11px; overflow-y:auto; flex:1; white-space:pre-wrap;">(翻訳待機中...)</div>
@@ -152,14 +149,14 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v4.00</span>
+      <span class="version-badge" id="versionBadge">v4.02 Robust</span>
     </h2>
     <div>
       <label>Cloudflare Worker URL (DeepL経由用):</label>
       <input type="text" id="workerUrl" value="https://blue-night-af7c.ieoa1000xbd.workers.dev/" placeholder="https://xxx.workers.dev/" style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
-      <label>DeepL API Key (Worker側で設定済の場合は空欄可):</label>
+      <label>DeepL API Key (Worker側で設定済の場合は空欄可/フォールバック用):</label>
       <input type="password" id="deeplKey" placeholder="DeepL Auth Key (任意)" style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
@@ -174,7 +171,6 @@
     <div>
       <label>マイク感度閾値 (音量閾値): <span id="thresholdVal">80</span></label>
       <input type="range" id="noiseThreshold" min="20" max="1000" value="80" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※冒頭の「It's」等を拾うため低い値（80付近）を推奨</div>
     </div>
 
     <div>
@@ -200,7 +196,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v4.00 (Worker統合・順次並列描画)";
+    const APP_VERSION = "v4.02 (堅牢化ロジック適用版)";
 
     let bridge = null;
     let currentMode = 1;
@@ -331,45 +327,81 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ 1. DeepL 超高速和訳（Cloudflare Worker経由）
+    // ★ 1. DeepL 超高速和訳（Worker経由 ＆ 直接通信フォールバック対応）
     async function fetchDeeplTranslationAsync(targetIndex, text) {
       const workerUrl = document.getElementById('workerUrl').value.trim();
       const deeplKey = document.getElementById('deeplKey').value.trim();
 
-      if (!workerUrl) {
-        setStatus("Worker URLが未設定です");
-        return;
+      let translatedText = "";
+
+      // A: Worker経由通信
+      if (workerUrl) {
+        try {
+          const res = await fetch(workerUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: text,
+              target_lang: 'JA',
+              auth_key: deeplKey || undefined
+            })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.translations && data.translations[0]?.text) {
+              translatedText = data.translations[0].text;
+            } else if (data.text) {
+              translatedText = data.text;
+            } else if (data.result) {
+              translatedText = data.result;
+            } else if (typeof data === 'string') {
+              translatedText = data;
+            }
+          }
+        } catch (e) {
+          console.warn("Worker fetch failed, trying direct API if key available:", e);
+        }
       }
 
-      try {
-        const res = await fetch(workerUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: text,
-            target_lang: 'JA',
-            auth_key: deeplKey || undefined
-          })
-        });
+      // B: Worker失敗時またはキー入力時の DeepL Direct API フォールバック
+      if (!translatedText && deeplKey) {
+        try {
+          const isFree = deeplKey.endsWith(':fx');
+          const directEndpoint = isFree 
+            ? 'https://api-free.deepl.com/v2/translate' 
+            : 'https://api.deepl.com/v2/translate';
 
-        if (!res.ok) throw new Error(`DeepL Worker Error: ${res.status}`);
+          const params = new URLSearchParams();
+          params.append('auth_key', deeplKey);
+          params.append('text', text);
+          params.append('target_lang', 'JA');
 
-        const data = await res.json();
-        const translatedText = data.translations ? data.translations[0].text : (data.text || '');
+          const directRes = await fetch(directEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params
+          });
 
-        if (historyList[targetIndex]) {
-          historyList[targetIndex].ja = translatedText;
-          // 和訳が届いたら直ちに描画を更新！
-          await updateDisplays();
-          setStatus('DeepL和訳表示完了');
+          if (directRes.ok) {
+            const directData = await directRes.json();
+            translatedText = directData.translations?.[0]?.text || "";
+          }
+        } catch (e) {
+          console.error("DeepL Direct Error:", e);
         }
-      } catch (e) {
-        console.error("DeepL Error:", e);
-        setStatus(`DeepLエラー: ${e.message}`);
+      }
+
+      if (translatedText && historyList[targetIndex]) {
+        historyList[targetIndex].ja = translatedText;
+        await updateDisplays();
+        setStatus('DeepL和訳表示完了');
+      } else {
+        setStatus('DeepL和訳の取得に失敗しました (Worker/Keyを確認してください)');
       }
     }
 
-    // ★ 2. OpenAI 返答ヒント生成（非同期追記）
+    // ★ 2. OpenAI 返答ヒント生成
     async function fetchOpenAiHintAsync(targetIndex, text) {
       const openAiKey = document.getElementById('apiKey').value.trim();
       if (!openAiKey) return;
@@ -405,7 +437,6 @@
 
           if (historyList[targetIndex]) {
             historyList[targetIndex].hint = hintText;
-            // ヒントが届いたら和訳枠の下へ自動更新！
             await updateDisplays();
             setStatus('返答ヒント表示完了');
           }
@@ -415,59 +446,63 @@
       }
     }
 
-    // ★ 並列起動処理
     function triggerParallelProcessing(targetIndex, text) {
-      setStatus(`並列処理中 (DeepL和訳 ＆ OpenAIヒント)...`);
+      setStatus(`並列処理実行中...`);
       fetchDeeplTranslationAsync(targetIndex, text);
       fetchOpenAiHintAsync(targetIndex, text);
     }
 
-    async function processQueue(isFinal = false) {
-      if (isProcessing) return;
-      if (activeTotalBytes < 800) return;
+    async function processQueue(isFinal = false, isForce = false) {
+      if (isProcessing && !isForce) return;
 
       isProcessing = true;
       const chunksToProcess = [...activePcmChunks];
       const bytesToProcess = activeTotalBytes;
       
-      if (isFinal) {
+      if (isFinal || isForce) {
         activePcmChunks = [];
         activeTotalBytes = 0;
       }
 
-      let currentTargetIndex = historyIndex;
+      let targetIndex = -1;
+      let targetText = "";
 
       try {
-        setStatus(`文字起こし中...`);
-        const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
-        let enText = await transcribeWithDeepgram(wavBlob);
+        if (chunksToProcess.length > 0 && bytesToProcess >= 800) {
+          setStatus(isFinal ? `確定文字起こし中...` : `リアルタイム文字起こし中...`);
+          const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
+          let enText = await transcribeWithDeepgram(wavBlob);
 
-        if (!isNoiseOrFiller(enText)) {
-          const now = Date.now();
-          const isNewSession = (now - sessionLastTime > 6000 || currentEnSession.length === 0);
+          if (!isNoiseOrFiller(enText)) {
+            const now = Date.now();
+            const isNewSession = (now - sessionLastTime > 6000 || currentEnSession.length === 0);
 
-          if (isNewSession) {
-            currentEnSession = [enText];
-          } else {
-            currentEnSession[currentEnSession.length - 1] = enText;
+            if (isNewSession) {
+              currentEnSession = [enText];
+            } else {
+              currentEnSession[currentEnSession.length - 1] = enText;
+            }
+            sessionLastTime = now;
+
+            const fullEn = currentEnSession.join(' ');
+
+            if (isNewSession || historyList.length === 0) {
+              historyList.push({ en: fullEn, ja: null, hint: null });
+            } else {
+              historyList[historyList.length - 1].en = fullEn;
+            }
+            
+            historyIndex = historyList.length - 1;
+            targetIndex = historyIndex;
+            targetText = fullEn;
+
+            await updateDisplays();
+            setStatus('英語更新完了');
           }
-          sessionLastTime = now;
-
-          const fullEn = currentEnSession.join(' ');
-
-          const newItem = { en: fullEn, ja: null, hint: null };
-
-          if (isNewSession || historyList.length === 0) {
-            historyList.push(newItem);
-          } else {
-            historyList[historyList.length - 1].en = fullEn;
-          }
-          historyIndex = historyList.length - 1;
-          currentTargetIndex = historyIndex;
-
-          // 上段英語を即時表示
-          await updateDisplays();
-          setStatus('文字起こし完了');
+        } else if (historyList.length > 0) {
+          // 強制送信時に音声バッファがない場合は現在の履歴を対象にする
+          targetIndex = historyIndex;
+          targetText = historyList[targetIndex].en;
         }
       } catch (e) {
         console.error(e);
@@ -475,10 +510,8 @@
       } finally {
         isProcessing = false;
         
-        // 話し終わり検出時に並列リクエスト実行
-        if (isFinal && historyList.length > 0 && currentTargetIndex >= 0) {
-          const targetEn = historyList[currentTargetIndex].en;
-          triggerParallelProcessing(currentTargetIndex, targetEn);
+        if ((isFinal || isForce) && targetIndex >= 0 && targetText) {
+          triggerParallelProcessing(targetIndex, targetText);
         }
       }
     }
@@ -505,7 +538,7 @@
           if (!chunkTimer) {
             chunkTimer = setTimeout(() => {
               chunkTimer = null;
-              processQueue(false);
+              processQueue(false, false);
             }, 300);
           }
 
@@ -513,7 +546,7 @@
           const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 350;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1) {
-              processQueue(true);
+              processQueue(true, false);
             }
           }, silenceMs);
         }
@@ -641,7 +674,7 @@
 
           if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
             if (currentMode === 2) {
-              processQueue(true);
+              processQueue(true, true);
             }
           }
 
@@ -680,8 +713,10 @@
       updateDisplays();
     };
 
+    // ★ 強制実行ボタン（ロック解除＋強制送信）
     window.forceSendPTT = function() {
-      processQueue(true);
+      isProcessing = false; // ロック強制解除
+      processQueue(true, true);
     };
 
     initG2();
