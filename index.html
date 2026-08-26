@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>G2 Translator App (v5.08-FIX)</title>
+  <title>EVEN G2 Translator App (v5.10-REQ)</title>
   <style>
     body {
       background-color: #111;
@@ -87,16 +87,13 @@
       overflow-y: auto;
     }
     .control-panel h2 { color: #00FF00; font-size: 15px; margin: 0 0 5px 0; display: flex; align-items: center; justify-content: space-between; }
-    
-    /* バージョン表示を目立たせるスタイル */
     .version-badge {
-      background: #FF0055;
-      color: #FFF;
-      font-size: 12px;
-      padding: 3px 8px;
-      border-radius: 4px;
+      background: #00FF00;
+      color: #000;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 10px;
       font-weight: bold;
-      box-shadow: 0 0 8px rgba(255, 0, 85, 0.6);
     }
     input, textarea, button {
       background: #222;
@@ -125,11 +122,11 @@
 
     .error-log-box {
       background: #080000;
-      border: 1px solid #ff3333;
-      color: #ff9999;
+      border: 1px solid #33ff33;
+      color: #66ff66;
       font-family: monospace;
       font-size: 10px;
-      height: 110px;
+      height: 100px;
       overflow-y: auto;
       padding: 6px;
       border-radius: 4px;
@@ -170,8 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <!-- バージョン明示 -->
-      <span class="version-badge" id="versionBadge">v5.08-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.10-REQ</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -202,7 +198,7 @@
       </div>
     </div>
 
-    <button onclick="forceSendPTT()" style="background:#0088cc; font-size:13px; padding:10px;">🎤 PTT 手動送信 / 強制和訳・ヒント実行</button>
+    <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信</button>
     <button onclick="clearHistory()" style="background:#cc3333;">🗑️ 履歴をクリア</button>
     
     <div style="border-top:1px solid #333; margin:2px 0;"></div>
@@ -211,10 +207,10 @@
     <div id="status" class="status">SDK接続待機中...</div>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
-      <span style="font-weight:bold; color:#FF5555;">【詳細デバッグ・エラーログ】</span>
+      <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System v5.08-FIX Loaded] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.10-REQ] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -226,7 +222,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.08-FIX";
+    const APP_VERSION = "v5.10-REQ";
 
     let bridge = null;
     let currentMode = 1;
@@ -391,7 +387,7 @@
 
       if (!response.ok) {
         const errText = await response.text();
-        logError("Deepgram Error", `Status: ${response.status}`, errText);
+        logError("Deepgram API Error", `Status: ${response.status}`, errText);
         throw new Error(`Deepgram Error (${response.status})`);
       }
       const data = await response.json();
@@ -401,7 +397,7 @@
     async function fetchGoogleTranslationAsync(targetIndex, text) {
       const googleKey = getInputValue('googleKey');
       if (!googleKey) {
-        logError("Google Translate", "API Keyが未入力です");
+        logError("Google Translate", "Keyが未設定です");
         return;
       }
 
@@ -420,7 +416,7 @@
 
           if (translatedText && historyList[targetIndex]) {
             historyList[targetIndex].ja = translatedText;
-            logError("Google Translate", "取得成功!", translatedText);
+            logError("Google Translate", "取得成功", translatedText);
             await updateDisplays();
           }
         } else {
@@ -428,35 +424,37 @@
           logError("Google API Error", `Status: ${response.status}`, errText);
         }
       } catch (e) {
-        logError("Google Translate", "通信例外発生", e.message);
+        logError("Google Translate", "通信エラー", e.message);
       }
     }
 
+    /* 【指示内容の修正箇所】OpenAI プロンプトと出力形式の最適化 */
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) {
-        if (!openAiKey) logError("OpenAI", "API Keyが未入力です");
+        if (!openAiKey) logError("OpenAI", "Keyが未設定です");
         return;
       }
 
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
 
-      const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。相手の発言に対し、ユーザーがその場で口に出しやすい自然な返答英文（1文）とカタカナ読み、日本語訳を出力してください。
+      const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。相手の発言に対して自然な返答ヒントを2つ作成してください。
 
-【厳格ルール】
-1. 可変可能な単語（文脈でユーザーが自由に置き換えられる部分）には、以下の品詞タグを付与してください。
-   - [動可:xxx] : 単体で置換しても後ろの前置詞や文脈に影響を与えない動詞（他動詞など）
-   - [動不:xxx] : 前置詞とセットの熟語（例: waiting for）や型が固定された動詞句（置換不可）
-   - [形:xxx] : 形容詞（状態・気持ち）
-   - [副:xxx] : 副詞（程度・強調）
-   - [名:xxx] : 名詞（モノ・人・場所・時間）
-2. 置き換えによって前置詞と不整合を起こす表現は避け、他動詞を使用するか熟語セット [動不:xxx for] として一括出力してください。
-3. 【重要】カタカナ読みは、英文全体の最初から最後までの全単語を省略せずに正確にカタカナ表記してください。
-4. 全体で改行は極力減らし、コンパクトに30〜40文字程度で出力してください。
+【出力ルール】
+1. 提案は2つのみ出力してください。
+   ・1つ目（1段目）: 肯定的な回答（文頭に「肯：」を付ける）
+   ・2つ目（2段目）: 否定的な回答（文頭に「否：」を付ける）
+2. 各提案の単語数は最大15単語までにしてください。
+3. 日本人が発音しづらい単語、伝わりにくい単語、誤解されやすい表記は避け、極力シンプルで自然な英文にしてください。
+4. 単語の入れ替え可能箇所（可変箇所）はカッコ表記を使わず、[動可:check] [動不:take care of] [名:time] [形:busy] [副:soon] のようにタグ表示のみにしてください。
+5. フォーマット順序は必ず【英語文章】➔【下段にカタカナ読み】➔【その後に和訳】の順に並べてください。
 
-出力フォーマット例:
-I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェック ザ スケジュール] (スケジュールを確認したい)`;
+【出力例】
+肯：I can [動可:help] you with that.
+[アイ キャン ヘルプ ユー ウィズ ザット] (それをお手伝いできます)
+否：I am [形:busy] right now.
+[アイ アム ビジー ライト ナウ] (今は手が離せません)`;
 
       try {
         logError("OpenAI", "送信中...", fullText);
@@ -469,7 +467,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 100,
+            max_tokens: 150,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: fullText }
@@ -483,7 +481,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
 
           if (newHint && historyList[targetIndex]) {
             historyList[targetIndex].hint = newHint;
-            logError("OpenAI", "取得成功!", newHint);
+            logError("OpenAI", "取得成功", newHint);
             await updateDisplays();
             setStatus('ヒント生成完了');
           }
@@ -492,16 +490,12 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           logError("OpenAI Error", `Status: ${res.status}`, errText);
         }
       } catch (e) {
-        logError("OpenAI", "通信例外発生", e.message);
+        logError("OpenAI", "通信エラー", e.message);
       }
     }
 
     function triggerParallelProcessing(targetIndex, text) {
-      if (targetIndex < 0 || !text) {
-        logError("Trigger", "対象テキストがないためスキップ", { targetIndex, text });
-        return;
-      }
-      setStatus(`和訳・ヒント処理発火中...`);
+      setStatus(`和訳・ヒント処理実行中...`);
       fetchGoogleTranslationAsync(targetIndex, text);
       fetchOpenAiHintAsync(targetIndex, text);
     }
@@ -518,9 +512,8 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
         activeTotalBytes = 0;
       }
 
-      let targetIndex = historyIndex;
-      let targetText = historyList[historyIndex]?.en || "";
-      let newTextGenerated = false;
+      let targetIndex = -1;
+      let targetText = "";
 
       try {
         if (chunksToProcess.length > 0 && bytesToProcess >= 800) {
@@ -549,22 +542,16 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
             historyIndex = historyList.length - 1;
             targetIndex = historyIndex;
             targetText = fullEn;
-            newTextGenerated = true;
 
             await updateDisplays();
           }
         }
       } catch (e) {
-        logError("ProcessQueue Exception", e.message);
+        logError("ProcessQueue", "音声文字起こし失敗", e.message);
       } finally {
-        // ロックを確実に解除
         isProcessing = false;
-        
-        // 確定フラグが立っている場合、または新しくテキストが生成された場合にAPI呼び出しを発火
-        if (isFinal || newTextGenerated) {
-          if (targetIndex >= 0 && targetText) {
-            triggerParallelProcessing(targetIndex, targetText);
-          }
+        if ((isFinal || targetIndex >= 0) && historyIndex >= 0 && historyList[historyIndex]) {
+          triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
         }
       }
     }
@@ -611,7 +598,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           const silenceDuration = parseInt(document.getElementById('silenceDuration').value, 10) || 1200;
           silenceTimer = setTimeout(() => {
             silenceTimer = null;
-            setStatus("無音検知 ➜ 確定・和訳発火");
+            setStatus("無音検知 ➜ 確定処理・翻訳開始");
             processQueue(true, true);
           }, silenceDuration);
         }
@@ -665,7 +652,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
       activeTotalBytes = 0;
       preRingBuffer = [];
       await updateDisplays();
-      setStatus('履歴クリア完了');
+      setStatus('履歴クリア');
     };
 
     window.addEventListener('keydown', (e) => {
@@ -776,19 +763,13 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
       updateDisplays();
     };
 
-    // 手動送信ボタンの完全独立実行
     window.forceSendPTT = function() {
       if (silenceTimer) clearTimeout(silenceTimer);
       silenceTimer = null;
-      isProcessing = false; // 強制ロック解除
-
-      logError("PTT Button", "手動実行が押されました");
+      isProcessing = false;
 
       if (historyIndex >= 0 && historyList[historyIndex]) {
-        const item = historyList[historyIndex];
-        triggerParallelProcessing(historyIndex, item.en);
-      } else {
-        logError("PTT Button", "対象の英語文がまだありません");
+        triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
       }
     };
 
