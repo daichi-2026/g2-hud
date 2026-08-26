@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v3.6 Async Render)</title>
+  <title>EVEN G2 Translator App (v3.61 Fixed)</title>
   <style>
     body {
       background-color: #111;
@@ -73,13 +73,8 @@
       margin-top: 4px;
       padding-right: 4px;
     }
-    .text-scroll-area::-webkit-scrollbar {
-      width: 6px;
-    }
-    .text-scroll-area::-webkit-scrollbar-thumb {
-      background: #00AA00;
-      border-radius: 3px;
-    }
+    .text-scroll-area::-webkit-scrollbar { width: 6px; }
+    .text-scroll-area::-webkit-scrollbar-thumb { background: #00AA00; border-radius: 3px; }
     .control-panel {
       width: 400px;
       padding-left: 20px;
@@ -163,7 +158,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.6 (即時描画対応)</span>
+      <span class="version-badge" id="versionBadge">v3.61 (修復版)</span>
     </h2>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -184,9 +179,9 @@
     </div>
 
     <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.3</span>秒</label>
-      <input type="range" id="silenceSec" min="0.1" max="1.5" step="0.05" value="0.3" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
-      <div style="font-size:10px; color:#888;">※小刻みな即時描画のため 0.3秒 を推奨</div>
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.4</span>秒</label>
+      <input type="range" id="silenceSec" min="0.1" max="1.5" step="0.05" value="0.4" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※安定動作のため 0.4秒 を推奨</div>
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -207,7 +202,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.6 (即時描画対応)";
+    const APP_VERSION = "v3.61 (修復版)";
     const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev/";
 
     let bridge = null;
@@ -310,13 +305,13 @@
     function isNoiseOrFiller(text) {
       if (!text) return true;
       const clean = text.trim().toLowerCase().replace(/[^a-z]/g, '');
-      const fillers = ['thankyou', 'thanks', 'you', 'mb', 'bye', 'am', 'so'];
-      return clean.length <= 1 || fillers.includes(clean);
+      const fillers = ['thankyou', 'thanks', 'you', 'mb', 'bye', 'am', 'so', 'a', 'the', 'is'];
+      return clean.length <= 2 || fillers.includes(clean);
     }
 
     async function transcribeWithDeepgram(wavBlob) {
       const deepgramKey = document.getElementById('deepgramKey').value.trim();
-      if (!deepgramKey) throw new Error("Deepgram API Keyを入力してください");
+      if (!deepgramKey) throw new Error("Deepgram Key未設定");
 
       const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true';
       const response = await fetch(url, {
@@ -329,44 +324,43 @@
       });
 
       if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(errJson.reason || `Deepgram Error (${response.status})`);
+        throw new Error(`Deepgram Error (${response.status})`);
       }
 
       const data = await response.json();
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    async function translateText(text) {
+    // 安全なDeepL呼び出し（エラー発生時は null を返して壊さない）
+    async function translateTextSafe(text) {
       const deeplKey = document.getElementById('deeplKey').value.trim();
-      
-      if (deeplKey) {
-        try {
-          const response = await fetch(WORKER_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text: text,
-              target_lang: 'JA',
-              auth_key: deeplKey
-            })
-          });
+      if (!deeplKey) return null;
 
-          if (response.ok) {
-            const data = await response.json();
-            if (data.translations && data.translations[0]) {
-              return data.translations[0].text;
-            }
+      try {
+        const response = await fetch(WORKER_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: text,
+            target_lang: 'JA',
+            auth_key: deeplKey
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.translations && data.translations[0]) {
+            return data.translations[0].text;
           }
-        } catch (e) {
-          console.warn("Workers DeepL Failed:", e);
         }
+      } catch (e) {
+        console.warn("Workers DeepL Failed:", e);
       }
-      return "（翻訳取得エラー）";
+      return null;
     }
 
     // バックグラウンドでOpenAIヒントを生成して画面更新する非同期関数
-    async function generateOpenAiHintAsync(targetIndex, fullEnText, fullJaText) {
+    async function generateOpenAiHintAsync(targetIndex, fullEnText) {
       const openAiKey = document.getElementById('apiKey').value.trim();
       if (!openAiKey) return;
 
@@ -395,9 +389,10 @@
           const data = await res.json();
           const hintText = data.choices[0]?.message?.content?.trim() || "";
           
-          // 該当インデックスの表示内容をヒント付きで上書き更新
           if (historyList[targetIndex]) {
-            historyList[targetIndex] = `【相手】\n${fullEnText}\n${fullJaText}\n-------------------\n【返答ヒント】\n${hintText}`;
+            // ヒント完了後、該当枠の末尾を置き換え更新
+            const fullJa = currentJaSession.join(' ');
+            historyList[targetIndex] = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n${hintText}`;
             await updateDisplays();
           }
         }
@@ -418,46 +413,49 @@
       activeTotalBytes = 0;
 
       try {
-        setStatus(`解析・更新中...`);
+        setStatus(`解析中...`);
         const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
         let enText = await transcribeWithDeepgram(wavBlob);
 
         if (!isNoiseOrFiller(enText)) {
-          const jaTranslation = await translateText(enText);
-
           const now = Date.now();
-          if (now - sessionLastTime > 8000 || currentEnSession.length === 0) {
+          const isNewSession = (now - sessionLastTime > 8000 || currentEnSession.length === 0);
+
+          if (isNewSession) {
             currentEnSession = [enText];
-            currentJaSession = [jaTranslation];
+            currentJaSession = [];
           } else {
             currentEnSession.push(enText);
-            currentJaSession.push(jaTranslation);
           }
           sessionLastTime = now;
 
           const fullEn = currentEnSession.join(' ');
+          
+          // 翻訳を取得（失敗時はスキップして前回の翻訳または空欄を保つ）
+          const jaTranslation = await translateTextSafe(fullEn);
+          if (jaTranslation) {
+            currentJaSession = [jaTranslation];
+          }
+
           const fullJa = currentJaSession.join(' ');
-
           const openAiKey = document.getElementById('apiKey').value.trim();
-          const initialHintLabel = openAiKey ? "（準備中...）" : "（OpenAI Key未設定）";
+          const hintLabel = openAiKey ? "（準備中...）" : "（OpenAI Key未設定）";
 
-          // 1. DeepLの翻訳結果までを最優先で「即時描画」
-          let currentContent = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n${initialHintLabel}`;
+          let currentContent = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n${hintLabel}`;
 
-          if (now - sessionLastTime > 8000 || historyList.length === 0) {
+          if (isNewSession || historyList.length === 0) {
             historyList.push(currentContent);
           } else {
             historyList[historyList.length - 1] = currentContent;
           }
           historyIndex = historyList.length - 1;
 
-          // 一刻も早くグラス描画を更新
           await updateDisplays();
           setStatus('待機中');
 
-          // 2. OpenAIの返答ヒントはバックグラウンド非同期処理に切り離す
+          // 非同期で返答ヒント生成
           if (openAiKey) {
-            generateOpenAiHintAsync(historyIndex, fullEn, fullJa);
+            generateOpenAiHintAsync(historyIndex, fullEn);
           }
 
         } else {
@@ -495,7 +493,7 @@
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 300;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 400;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1) {
               processQueue();
