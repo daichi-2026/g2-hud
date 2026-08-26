@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v3.67 Direct Fix)</title>
+  <title>EVEN G2 Translator App (v4.00 Progressive Async Render)</title>
   <style>
     body {
       background-color: #111;
@@ -137,12 +137,12 @@
         </div>
         <!-- 上段：英語枠プレビュー -->
         <div class="preview-box" style="height: 115px;">
-          <div style="font-size:9px; color:#888;">【相手の英語】</div>
+          <div style="font-size:9px; color:#888;">【相手の英語 (Deepgram)】</div>
           <div id="preview-en" style="color:#00FF00; font-size:11px; font-weight:bold; overflow-y:auto; flex:1; white-space:pre-wrap;">(音声待機中...)</div>
         </div>
         <!-- 下段：日本語訳 ＆ ヒント枠プレビュー -->
         <div class="preview-box" style="height: 135px;">
-          <div style="font-size:9px; color:#888;">【日本語訳 ＆ 返答ヒント】</div>
+          <div style="font-size:9px; color:#888;">【日本語訳 (DeepL) ＆ 返答ヒント (OpenAI)】</div>
           <div id="preview-ja" style="color:#fff; font-size:11px; overflow-y:auto; flex:1; white-space:pre-wrap;">(翻訳待機中...)</div>
         </div>
       </div>
@@ -152,14 +152,22 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.67 (翻訳確実発動版)</span>
+      <span class="version-badge" id="versionBadge">v4.00</span>
     </h2>
+    <div>
+      <label>Cloudflare Worker URL (DeepL経由用):</label>
+      <input type="text" id="workerUrl" value="https://blue-night-af7c.ieoa1000xbd.workers.dev/" placeholder="https://xxx.workers.dev/" style="width:100%; box-sizing:border-box;" />
+    </div>
+    <div>
+      <label>DeepL API Key (Worker側で設定済の場合は空欄可):</label>
+      <input type="password" id="deeplKey" placeholder="DeepL Auth Key (任意)" style="width:100%; box-sizing:border-box;" />
+    </div>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
       <input type="password" id="deepgramKey" placeholder="Deepgram Key" style="width:100%; box-sizing:border-box;" />
     </div>
     <div>
-      <label>OpenAI API Key (翻訳＆返答ヒント生成):</label>
+      <label>OpenAI API Key (返答ヒント生成):</label>
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
     </div>
     
@@ -192,7 +200,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.67 (翻訳確実発動版)";
+    const APP_VERSION = "v4.00 (Worker統合・順次並列描画)";
 
     let bridge = null;
     let currentMode = 1;
@@ -222,9 +230,9 @@
     function getCurrentJaText() {
       if (historyList.length === 0) return "(翻訳・ヒント待機中...)";
       const item = historyList[historyIndex];
-      const ja = item.ja || "（AI翻訳中...）";
-      const hint = item.hint || "（AIヒント生成中...）";
-      return `【訳】${ja}\n-------------------\n【ヒント】\n${hint}`;
+      const ja = item.ja ? `【訳】${item.ja}` : "【訳】（DeepL翻訳中...）";
+      const hint = item.hint ? `【ヒント】\n${item.hint}` : "【ヒント】（AI思考中...）";
+      return `${ja}\n-------------------\n${hint}`;
     }
 
     function normalizePcm(pcmData) {
@@ -323,15 +331,48 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ OpenAI 翻訳＆ヒント生成（確実に呼び出してログ表示）
-    async function processAiTranslateAndHintAsync(targetIndex, fullEnText) {
-      const openAiKey = document.getElementById('apiKey').value.trim();
-      if (!openAiKey) {
-        setStatus("エラー: OpenAI API Keyが入力されていません");
+    // ★ 1. DeepL 超高速和訳（Cloudflare Worker経由）
+    async function fetchDeeplTranslationAsync(targetIndex, text) {
+      const workerUrl = document.getElementById('workerUrl').value.trim();
+      const deeplKey = document.getElementById('deeplKey').value.trim();
+
+      if (!workerUrl) {
+        setStatus("Worker URLが未設定です");
         return;
       }
 
-      setStatus(`OpenAI翻訳・ヒント生成中... (${fullEnText.substring(0, 20)}...)`);
+      try {
+        const res = await fetch(workerUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: text,
+            target_lang: 'JA',
+            auth_key: deeplKey || undefined
+          })
+        });
+
+        if (!res.ok) throw new Error(`DeepL Worker Error: ${res.status}`);
+
+        const data = await res.json();
+        const translatedText = data.translations ? data.translations[0].text : (data.text || '');
+
+        if (historyList[targetIndex]) {
+          historyList[targetIndex].ja = translatedText;
+          // 和訳が届いたら直ちに描画を更新！
+          await updateDisplays();
+          setStatus('DeepL和訳表示完了');
+        }
+      } catch (e) {
+        console.error("DeepL Error:", e);
+        setStatus(`DeepLエラー: ${e.message}`);
+      }
+    }
+
+    // ★ 2. OpenAI 返答ヒント生成（非同期追記）
+    async function fetchOpenAiHintAsync(targetIndex, text) {
+      const openAiKey = document.getElementById('apiKey').value.trim();
+      if (!openAiKey) return;
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -342,51 +383,43 @@
           },
           body: JSON.stringify({
             model: 'gpt-4o-mini',
-            temperature: 0.2,
-            max_tokens: 200,
+            temperature: 0.3,
+            max_tokens: 150,
             messages: [
               {
                 role: 'system',
-                content: `入力された英語に対し、以下のフォーマット厳守で出力してください。余計な解説や前置きは一切不要です。
+                content: `相手の英語発言に対する「自然な返答ヒント」を3行で出力してください。解説は不要です。
 
-【日本語訳】
-(相手の発言の自然な日本語訳)
-
-【返答ヒント】
 (短く返す英語)
 (カタカナフリガナ)
 (日本語訳)`
               },
-              { role: 'user', content: fullEnText }
+              { role: 'user', content: text }
             ]
           })
         });
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(`OpenAI API Error ${res.status}: ${errData.error?.message || ''}`);
-        }
+        if (res.ok) {
+          const data = await res.json();
+          const hintText = data.choices[0]?.message?.content?.trim() || "";
 
-        const data = await res.json();
-        const content = data.choices[0]?.message?.content?.trim() || "";
-
-        const jaMatch = content.match(/【日本語訳】\n([\s\S]*?)(?=\n【返答ヒント】|$)/);
-        const hintMatch = content.match(/【返答ヒント】\n([\s\S]*)$/);
-
-        if (historyList[targetIndex]) {
-          historyList[targetIndex].ja = jaMatch && jaMatch[1] ? jaMatch[1].trim() : content;
-          historyList[targetIndex].hint = hintMatch && hintMatch[1] ? hintMatch[1].trim() : "";
-          await updateDisplays();
-          setStatus('AI翻訳・ヒント表示完了');
+          if (historyList[targetIndex]) {
+            historyList[targetIndex].hint = hintText;
+            // ヒントが届いたら和訳枠の下へ自動更新！
+            await updateDisplays();
+            setStatus('返答ヒント表示完了');
+          }
         }
       } catch (e) {
         console.error("OpenAI Error:", e);
-        setStatus(`OpenAI失敗: ${e.message}`);
-        if (historyList[targetIndex]) {
-          historyList[targetIndex].ja = `(翻訳エラー: ${e.message})`;
-          await updateDisplays();
-        }
       }
+    }
+
+    // ★ 並列起動処理
+    function triggerParallelProcessing(targetIndex, text) {
+      setStatus(`並列処理中 (DeepL和訳 ＆ OpenAIヒント)...`);
+      fetchDeeplTranslationAsync(targetIndex, text);
+      fetchOpenAiHintAsync(targetIndex, text);
     }
 
     async function processQueue(isFinal = false) {
@@ -432,6 +465,7 @@
           historyIndex = historyList.length - 1;
           currentTargetIndex = historyIndex;
 
+          // 上段英語を即時表示
           await updateDisplays();
           setStatus('文字起こし完了');
         }
@@ -441,10 +475,10 @@
       } finally {
         isProcessing = false;
         
-        // ★修正ポイント: 発話終了(isFinal)のタイミングで、最新の英語文に対して確実にOpenAIを呼ぶ
+        // 話し終わり検出時に並列リクエスト実行
         if (isFinal && historyList.length > 0 && currentTargetIndex >= 0) {
           const targetEn = historyList[currentTargetIndex].en;
-          processAiTranslateAndHintAsync(currentTargetIndex, targetEn);
+          triggerParallelProcessing(currentTargetIndex, targetEn);
         }
       }
     }
@@ -479,7 +513,7 @@
           const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 350;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1) {
-              processQueue(true); // ★話し終わり時に isFinal=true で呼び出し
+              processQueue(true);
             }
           }, silenceMs);
         }
