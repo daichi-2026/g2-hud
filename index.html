@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v3.61 Fixed)</title>
+  <title>EVEN G2 Translator App (v3.62 Fixed)</title>
   <style>
     body {
       background-color: #111;
@@ -158,7 +158,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.61 (修復版)</span>
+      <span class="version-badge" id="versionBadge">v3.62 (修正版)</span>
     </h2>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -202,7 +202,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.61 (修復版)";
+    const APP_VERSION = "v3.62 (修正版)";
     const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev/";
 
     let bridge = null;
@@ -331,7 +331,6 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // 安全なDeepL呼び出し（エラー発生時は null を返して壊さない）
     async function translateTextSafe(text) {
       const deeplKey = document.getElementById('deeplKey').value.trim();
       if (!deeplKey) return null;
@@ -359,8 +358,7 @@
       return null;
     }
 
-    // バックグラウンドでOpenAIヒントを生成して画面更新する非同期関数
-    async function generateOpenAiHintAsync(targetIndex, fullEnText) {
+    async function generateOpenAiHintAsync(targetIndex, fullEnText, fullJaText) {
       const openAiKey = document.getElementById('apiKey').value.trim();
       if (!openAiKey) return;
 
@@ -390,9 +388,7 @@
           const hintText = data.choices[0]?.message?.content?.trim() || "";
           
           if (historyList[targetIndex]) {
-            // ヒント完了後、該当枠の末尾を置き換え更新
-            const fullJa = currentJaSession.join(' ');
-            historyList[targetIndex] = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n${hintText}`;
+            historyList[targetIndex] = `【相手】\n${fullEnText}\n${fullJaText}\n-------------------\n【返答ヒント】\n${hintText}`;
             await updateDisplays();
           }
         }
@@ -423,7 +419,6 @@
 
           if (isNewSession) {
             currentEnSession = [enText];
-            currentJaSession = [];
           } else {
             currentEnSession.push(enText);
           }
@@ -431,13 +426,13 @@
 
           const fullEn = currentEnSession.join(' ');
           
-          // 翻訳を取得（失敗時はスキップして前回の翻訳または空欄を保つ）
+          // 英文全体をDeepLに翻訳させる
           const jaTranslation = await translateTextSafe(fullEn);
           if (jaTranslation) {
             currentJaSession = [jaTranslation];
           }
 
-          const fullJa = currentJaSession.join(' ');
+          const fullJa = currentJaSession.length > 0 ? currentJaSession.join(' ') : "（翻訳処理中...）";
           const openAiKey = document.getElementById('apiKey').value.trim();
           const hintLabel = openAiKey ? "（準備中...）" : "（OpenAI Key未設定）";
 
@@ -453,9 +448,9 @@
           await updateDisplays();
           setStatus('待機中');
 
-          // 非同期で返答ヒント生成
+          // 非同期で返答ヒント生成をバックグラウンド実行
           if (openAiKey) {
-            generateOpenAiHintAsync(historyIndex, fullEn);
+            generateOpenAiHintAsync(historyIndex, fullEn, fullJa);
           }
 
         } else {
