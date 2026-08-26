@@ -308,7 +308,7 @@
       if (pcmData instanceof Uint8Array) return pcmData;
       if (pcmData instanceof ArrayBuffer) return new Uint8Array(pcmData);
       if (Array.isArray(pcmData)) return new Uint8Array(pcmData);
-      if (ArrayBuffer.isView(pcmData)) return new Uint8Array(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength);
+      if (ArrayBuffer.isView(pcmData)) return new Uint8Array(pcmData.byteOffset, pcmData.byteLength);
       return null;
     }
 
@@ -414,48 +414,45 @@
       }
     }
 
-    // ★ ご指定条件に完全対応したOpenAIプロンプト修正箇所
+    // ★ 短いフレーズ（即時切り出し）に対応した超低遅延プロンプト
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) return;
 
       const item = historyList[targetIndex];
 
-      if (item.lastProcessedText === fullText) return;
-
-      let textToProcess = fullText;
+      // 全体文字列から「まだAIへ送っていない新しく増えた差分テキスト」だけを抽出
+      let addedChunk = fullText;
       if (item.lastProcessedText && fullText.startsWith(item.lastProcessedText)) {
-        textToProcess = fullText.slice(item.lastProcessedText.length).trim();
+        addedChunk = fullText.slice(item.lastProcessedText.length).trim();
+      } else if (item.lastProcessedText === fullText) {
+        return; // 変更なし
       }
 
-      if (!textToProcess || textToProcess.length < 3) return;
+      if (!addedChunk || addedChunk.length < 2) return;
 
+      // 処理済み文字列を更新
       item.lastProcessedText = fullText;
 
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
 
-      const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。相手の発言に対して、最も適した自然な英語の返答ヒントを【肯定】と【否定】の2つのパターンで作成してください。
+      const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。
+相手が話し始めた短いフレーズ（発言の断片・前半）に対して、遅延なく即座に返せる自然な英語の返答ヒントを作成してください。
 
 【厳格ルール】
-1. 返答は「肯定的な回答」と「否定的な回答」の合計2つのみを作成してください。
-2. 1つ目の文頭には「肯：」、2つ目の文頭には「否：」と表示してください。
-3. 返答英文の長さは【15単語以内】としてください。
-4. 日本人が発音しにくい、または相手に誤解されやすい難解な単語は避け、明確で平易な単語を使用してください。
-5. ユーザーが置換可能な部分には、カッコを使わずに「品詞名: 単語」の形で直接表記してください（例: 動可: check / 名: schedule）。
+1. 肯定的な返答（1行目）と否定的な返答（2行目）の2つのみを作成してください。
+2. 改行ルール：
+   - 肯：の行、否：の行の内部では一切改行せず、英文・フリガナ（カタカナ）・和訳を半角スペース区切りで1行に詰めて出力してください。
+   - 肯：の行と否：の行の間のみ改行してください。
+3. 英文の長さは【15単語以内】とし、発音しやすく誤解の少ない平易な単語を選んでください。
+4. ユーザーが置換可能な部分には、カッコを使わずに「品詞名: 単語」の形で直接表記してください（例: 動可: check / 名: schedule）。
    - 品詞表記: 動可:（単体で置換可能）, 動不:（前置詞セットの熟語）, 形:, 副:, 名:
-6. 出力レイアウトは必ず各パターンにおいて以下の3行形式を守ってください：
-   1行目：肯：（または 否：） [英文]
-   2行目：[フリガナ（英文全体の全単語のカタカナ読み）]
-   3行目：（日本語訳）
+5. 全単語のカタカナ読み（フリガナ）は [ ] でくくってください。和訳は（ ）でくくってください。
 
 【出力フォーマット例】
-肯：I can 動可: check the 名: schedule right now.
-[アイ キャン チェック ザ スケジュール ライト ナウ]
-（今すぐスケジュールを確認できます）
-否：I am 動不: working on another 名: task right now.
-[アイ アム ワーキング オン アナザー タスク ライト ナウ]
-（今は別のタスクに対応中です）`;
+肯：I can 動可: check the 名: schedule right now. [アイ キャン チェック ザ スケジュール ライト ナウ] （今すぐスケジュールを確認できます）
+否：I am 動不: working on another 名: task right now. [アイ アム ワーキング オン アナザー タスク ライト ナウ] （今は別のタスクに対応中です）`;
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -467,10 +464,10 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 200,
+            max_tokens: 150,
             messages: [
               { role: 'system', content: systemPrompt },
-              { role: 'user', content: textToProcess }
+              { role: 'user', content: addedChunk }
             ]
           })
         });
@@ -480,9 +477,14 @@
           const newHint = data.choices[0]?.message?.content?.trim() || "";
 
           if (newHint && historyList[targetIndex]) {
-            historyList[targetIndex].hint = newHint;
+            // ★ 上書きせず、既存のヒントの直後に改行して継ぎ足す（スタック）
+            if (historyList[targetIndex].hint) {
+              historyList[targetIndex].hint += "\n" + newHint;
+            } else {
+              historyList[targetIndex].hint = newHint;
+            }
             await updateDisplays();
-            setStatus('ヒント追記完了');
+            setStatus('ヒント継ぎ足し完了');
           }
         }
       } catch (e) {
