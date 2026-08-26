@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.00 Fast - Auto Save Keys)</title>
+  <title>EVEN G2 Translator App (v5.01 Fixed - Fixed Hint & Auto Save)</title>
   <style>
     body {
       background-color: #111;
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.00 Fast</span>
+      <span class="version-badge" id="versionBadge">v5.01 Fixed</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -213,7 +213,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.00 Fast";
+    const APP_VERSION = "v5.01 Fixed";
 
     let bridge = null;
     let currentMode = 1;
@@ -234,7 +234,7 @@
     let historyList = [];
     let historyIndex = -1;
 
-    // --- ★ Edge(localStorage) キー自動保存・自動読み込み処理 ---
+    // Edge(localStorage) キー自動保存・復元
     function initKeyStorage() {
       const gEl = document.getElementById('googleKey');
       const dEl = document.getElementById('deepgramKey');
@@ -279,7 +279,7 @@
       if (historyList.length === 0) return "(翻訳・ヒント待機中...)";
       const item = historyList[historyIndex];
       const ja = item.ja ? `【訳】${item.ja}` : "【訳】（Google翻訳中...）";
-      const hint = item.hint ? `【ヒント】\n${item.hint}` : "【ヒント】（AI思考中...）";
+      const hint = item.hint ? `【ヒント】\n${item.hint}` : "【ヒント】（発言完了後にAI作成...）";
       return `${ja}\n-------------------\n${hint}`;
     }
 
@@ -359,10 +359,7 @@
 
     async function transcribeWithDeepgram(wavBlob) {
       const deepgramKey = getInputValue('deepgramKey');
-      if (!deepgramKey) {
-        logError("Deepgram", "API Key未入力");
-        throw new Error("Deepgram Key未設定");
-      }
+      if (!deepgramKey) throw new Error("Deepgram Key未設定");
 
       const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true';
       const response = await fetch(url, {
@@ -374,37 +371,21 @@
         body: wavBlob
       });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        logError("Deepgram", `HTTP Error ${response.status}`, errText);
-        throw new Error(`Deepgram Error (${response.status})`);
-      }
-
+      if (!response.ok) throw new Error(`Deepgram Error (${response.status})`);
       const data = await response.json();
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
     async function fetchGoogleTranslationAsync(targetIndex, text) {
       const googleKey = getInputValue('googleKey');
-      if (!googleKey) {
-        logError("Google Translate", "API Key未入力");
-        return;
-      }
+      if (!googleKey) return;
 
       try {
-        logError("Google Translate", "直接APIリクエスト送信中...");
         const url = `https://translation.googleapis.com/language/translate/v2?key=${googleKey}`;
-        
         const response = await fetch(url, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            q: text,
-            target: 'ja',
-            format: 'text'
-          })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q: text, target: 'ja', format: 'text' })
         });
 
         if (response.ok) {
@@ -414,23 +395,20 @@
           if (translatedText && historyList[targetIndex]) {
             historyList[targetIndex].ja = translatedText;
             await updateDisplays();
-            setStatus('Google和訳表示完了');
-            logError("Google Translate", "和訳成功: " + translatedText);
           }
-        } else {
-          const errText = await response.text();
-          logError("Google Translate", `HTTP Error ${response.status}`, errText);
         }
       } catch (e) {
-        logError("Google Translate", "通信エラー発生", e.message);
+        logError("Google Translate", "通信エラー", e.message);
       }
     }
 
+    // ★ 返答ヒント作成（すでにヒントが存在する場合はスキップして上書きを完全防止）
     async function fetchOpenAiHintAsync(targetIndex, text) {
       const openAiKey = getInputValue('apiKey');
-      if (!openAiKey) {
-        logError("OpenAI", "API Key未入力");
-        return;
+      if (!openAiKey) return;
+
+      if (historyList[targetIndex] && historyList[targetIndex].hint) {
+        return; // 上書き防止
       }
 
       try {
@@ -443,11 +421,11 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 150,
+            max_tokens: 120,
             messages: [
               {
                 role: 'system',
-                content: '英会話アシスタントです。相手の発言に対する簡潔な返答フレーズを英語で1文だけ作成し、続けて（）内にカタカナ読みと日本語訳を添えて出力してください。前置きや解説は一切不要です。'
+                content: '英会話アシスタントです。相手の発言に対する簡潔な返答フレーズを英語1文で作成し、直後に（日本語訳）を短く添えて出力してください。カタカナや前置きは一切不要です。'
               },
               { role: 'user', content: text }
             ]
@@ -458,26 +436,25 @@
           const data = await res.json();
           const hintText = data.choices[0]?.message?.content?.trim() || "";
 
-          if (historyList[targetIndex]) {
+          if (historyList[targetIndex] && !historyList[targetIndex].hint) {
             historyList[targetIndex].hint = hintText;
             await updateDisplays();
-            setStatus('返答ヒント表示完了');
-            logError("OpenAI", "ヒント生成成功");
+            setStatus('返答ヒント表示完了（固定）');
           }
-        } else {
-          const errBody = await res.text();
-          logError("OpenAI", `HTTP ${res.status}`, errBody);
         }
       } catch (e) {
         logError("OpenAI", "通信エラー", e.message);
       }
     }
 
-    function triggerParallelProcessing(targetIndex, text) {
-      setStatus(`和訳・ヒント処理実行中...`);
-      logError("Trigger", "並列処理開始: " + text);
+    // ★ 並列処理制御：和訳は逐次更新、ヒント生成は「発言が一区切りした時(isFinal)」のみ呼ぶ
+    function triggerParallelProcessing(targetIndex, text, isFinal) {
+      setStatus(`処理実行中...`);
       fetchGoogleTranslationAsync(targetIndex, text);
-      fetchOpenAiHintAsync(targetIndex, text);
+
+      if (isFinal && historyList[targetIndex] && !historyList[targetIndex].hint) {
+        fetchOpenAiHintAsync(targetIndex, text);
+      }
     }
 
     async function processQueue(isFinal = false, isForce = false) {
@@ -536,8 +513,8 @@
         }
       } finally {
         isProcessing = false;
-        if (targetIndex >= 0 && targetText && (isFinal || isForce || currentMode === 1)) {
-          triggerParallelProcessing(targetIndex, targetText);
+        if (targetIndex >= 0 && targetText) {
+          triggerParallelProcessing(targetIndex, targetText, isFinal || isForce);
         }
       }
     }
@@ -644,7 +621,6 @@
     });
 
     async function initG2() {
-      // 画面ロード時に自動読み込み初期化
       initKeyStorage();
 
       try {
