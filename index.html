@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.05 Speed Restore)</title>
+  <title>EVEN G2 Translator App (v5.06 Custom Profile)</title>
   <style>
     body {
       background-color: #111;
@@ -95,13 +95,17 @@
       border-radius: 10px;
       font-weight: bold;
     }
-    input, button {
+    input, textarea, button {
       background: #222;
       border: 1px solid #444;
       color: #fff;
       padding: 5px;
       border-radius: 4px;
       font-size: 12px;
+    }
+    textarea {
+      resize: vertical;
+      font-family: inherit;
     }
     button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 7px; }
     button:hover { background: #00dd00; color: #000; }
@@ -122,7 +126,7 @@
       color: #66ff66;
       font-family: monospace;
       font-size: 10px;
-      height: 120px;
+      height: 100px;
       overflow-y: auto;
       padding: 6px;
       border-radius: 4px;
@@ -163,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.05 Speed</span>
+      <span class="version-badge" id="versionBadge">v5.06 Tagging</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -176,6 +180,12 @@
     <div>
       <label>OpenAI API Key (返答ヒント生成):</label>
       <input type="password" id="apiKey" placeholder="sk-..." style="width:100%; box-sizing:border-box;" />
+    </div>
+
+    <!-- 思考プロファイル・キーワード設定枠 -->
+    <div>
+      <label style="color:#00FF00; font-weight:bold;">思考プロファイル・キーワード (AI連携用):</label>
+      <textarea id="userProfile" rows="2" placeholder="例: 経理財務 / 丁寧かつ結論ファースト / 趣味: 読書 / 返答方針: 簡潔に" style="width:100%; box-sizing:border-box;"></textarea>
     </div>
     
     <div style="display:flex; gap:10px;">
@@ -213,7 +223,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.05 Speed";
+    const APP_VERSION = "v5.06 Tagging";
 
     let bridge = null;
     let currentMode = 1;
@@ -238,14 +248,17 @@
       const gEl = document.getElementById('googleKey');
       const dEl = document.getElementById('deepgramKey');
       const oEl = document.getElementById('apiKey');
+      const pEl = document.getElementById('userProfile');
 
       if (gEl) gEl.value = localStorage.getItem('google_api_key') || '';
       if (dEl) dEl.value = localStorage.getItem('deepgram_api_key') || '';
       if (oEl) oEl.value = localStorage.getItem('openai_api_key') || '';
+      if (pEl) pEl.value = localStorage.getItem('user_profile_keywords') || '';
 
       if (gEl) gEl.addEventListener('input', (e) => localStorage.setItem('google_api_key', e.target.value.trim()));
       if (dEl) dEl.addEventListener('input', (e) => localStorage.setItem('deepgram_api_key', e.target.value.trim()));
       if (oEl) oEl.addEventListener('input', (e) => localStorage.setItem('openai_api_key', e.target.value.trim()));
+      if (pEl) pEl.addEventListener('input', (e) => localStorage.setItem('user_profile_keywords', e.target.value));
     }
 
     function getInputValue(id) {
@@ -401,7 +414,7 @@
       }
     }
 
-    // ★ 高速化＆文字数制限を厳正化したコンパクトルビヒント生成
+    // ★ ユーザープロファイル・可変品詞タグ対応 OpenAIヒント生成
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) return;
@@ -419,6 +432,24 @@
 
       item.lastProcessedText = fullText;
 
+      const userProfileKeywords = getInputValue('userProfile');
+      const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
+
+      const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。相手の発言に対し、ユーザーがその場で口に出しやすい自然な返答英文（1文）とカタカナ読み、日本語訳を出力してください。
+
+【厳格ルール】
+1. 可変可能な単語（文脈でユーザーが自由に置き換えられる部分）には、以下の品詞タグを付与してください。
+   - [動可:xxx] : 単体で置換しても後ろの前置詞や文脈に影響を与えない動詞（他動詞など）
+   - [動不:xxx] : 前置詞とセットの熟語（例: waiting for）や型が固定された動詞句（置換不可）
+   - [形:xxx] : 形容詞（状態・気持ち）
+   - [副:xxx] : 副詞（程度・強調）
+   - [名:xxx] : 名詞（モノ・人・場所・時間）
+2. 置き換えによって前置詞と不整合を起こす表現は避け、他動詞を使用するか熟語セット [動不:xxx for] として一括出力してください。
+3. 全体で改行は極力減らし、コンパクトに30〜40文字程度で出力してください。
+
+出力フォーマット例:
+I want to [動可:check] the [名:schedule]. [チェッキング ザ スケジュール] (スケジュールを確認したい)`;
+
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -429,12 +460,9 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 80,
+            max_tokens: 100,
             messages: [
-              {
-                role: 'system',
-                content: '英会話アシスタントです。相手の発言（または追加文）に対し、極めて簡潔な返答英文（1文）とカタカナ読み、日本語訳を出力してください。改行は極力使わず、全幅で30文字程度に収めてください。\n例: Yeah! [イエス] (そうですね)'
-              },
+              { role: 'system', content: systemPrompt },
               { role: 'user', content: textToProcess }
             ]
           })
