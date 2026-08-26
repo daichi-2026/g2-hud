@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.07 Smart Reaction)</title>
+  <title>EVEN G2 Translator App (v5.08 Tagging Fixed)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.07 Smart Reaction</span>
+      <span class="version-badge" id="versionBadge">v5.08 Tagging Fixed</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -223,7 +223,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.07 Smart Reaction";
+    const APP_VERSION = "v5.08 Tagging Fixed";
 
     let bridge = null;
     let currentMode = 1;
@@ -435,29 +435,29 @@
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
 
-      // 相槌・軽い返答優先プロンプト
+      // 品詞タグ強制プロンプト
       const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。
 相手の発言（または途中のフレーズ）に対し、最も自然でテンポの良い【肯定】と【否定】の返答ヒントを作成してください。
 
 【出力判断ルール】
-1. **文の途中・雑談の導入・同意を求めるようなフレーズの場合**：
-   不自然なオウム返しやフルスピーチを行わず、「Yeah, totally.」「I know, right?」「Totally.」「Not really.」のような【1〜4単語程度の相槌・軽い同意・否定】を絶対優先してください。
-2. **具体的な質問・提案の場合**：
+1. **文の途中・雑談の導入・同意を求めるフレーズの場合**：
+   長文で返さず、「Yeah, I 動可: feel 形: same.」「Not really, it's 形: typical.」などの1〜4単語程度の相槌・軽い返答にしてください。
+2. **具体的な質問・提案・やり取りの場合**：
    簡潔に答えられる15単語以内の文を作成してください。
 
-【フォーマット厳格ルール】
+【フォーマット＆品詞タグ厳格ルール】
 - 肯定（1行目）と否定（2行目）の2行のみを出力。
 - 各行は一切改行せず、英文・カタカナ・和訳を半角スペース区切りで1行にまとめる。
 - カタカナは [ ]、和訳は（ ）で囲む。
-- 置換可能語句のみ「品詞名: 単語」表記（例: 動可: check / 名: schedule）。
+- **文章の長さに関わらず、主要な単語（動詞・名詞・形容詞）には例外なく必ず「動可:」「動不:」「名:」「形:」の品詞タグを付与してください。**
 
 【出力例（導入・雑談時）】
-肯：Yeah, it really is. [ヤァ イット リアリー イズ] （そうですね、本当に）
-否：Not really, actually. [ノット リアリー アクチュアリィ] （そうでもないですよ）
+肯：Yeah, I 動可: feel 形: same. [ヤァ アイ フィール セイム] （そうですね、同感です）
+否：Not really, I 形: like this 名: heat. [ノット リアリー アイ ライク ディス ヒート] （そうでもないです、この暑さが好きです）
 
-【出力例（質問時）】
-肯：I can 動可: check the 名: schedule. [アイ キャン チェック ザ スケジュール] （スケジュールを確認できます）
-否：I am 動不: busy with another 名: task. [アイ アム ビジィ ウィズ アナザー タスク] （別のタスクで忙しいです）`;
+【出力例（質問・挨拶時）】
+肯：I've been 動可: doing 形: well, 名: thanks! [アイヴ ビーン ドゥーイング ウェル サンクス] （元気にやっています、ありがとう！）
+否：I am 動不: feeling 形: bad 名: lately. [アイ アム フィーリング バッド レイトリー] （最近あまり調子が良くありません）`;
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -469,7 +469,7 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 80,
+            max_tokens: 100,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: addedChunk }
