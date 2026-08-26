@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.07 Stream)</title>
+  <title>EVEN G2 Translator App (v5.07 Stream Fixed)</title>
   <style>
     body {
       background-color: #111;
@@ -371,7 +371,10 @@
 
     async function transcribeWithDeepgram(wavBlob) {
       const deepgramKey = getInputValue('deepgramKey');
-      if (!deepgramKey) throw new Error("Deepgram Key未設定");
+      if (!deepgramKey) {
+        logError("Deepgram", "Keyが空です");
+        throw new Error("Deepgram Key未設定");
+      }
 
       const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true';
       const response = await fetch(url, {
@@ -383,16 +386,24 @@
         body: wavBlob
       });
 
-      if (!response.ok) throw new Error(`Deepgram Error (${response.status})`);
+      if (!response.ok) {
+        const errText = await response.text();
+        logError("Deepgram API Error", `Status: ${response.status}`, errText);
+        throw new Error(`Deepgram Error (${response.status})`);
+      }
       const data = await response.json();
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
     async function fetchGoogleTranslationAsync(targetIndex, text) {
       const googleKey = getInputValue('googleKey');
-      if (!googleKey) return;
+      if (!googleKey) {
+        logError("Google Translate", "Keyが未設定です");
+        return;
+      }
 
       try {
+        logError("Google Translate", "送信中...", text);
         const url = `https://translation.googleapis.com/language/translate/v2?key=${googleKey}`;
         const response = await fetch(url, {
           method: 'POST',
@@ -406,8 +417,12 @@
 
           if (translatedText && historyList[targetIndex]) {
             historyList[targetIndex].ja = translatedText;
+            logError("Google Translate", "取得成功", translatedText);
             await updateDisplays();
           }
+        } else {
+          const errText = await response.text();
+          logError("Google API Error", `Status: ${response.status}`, errText);
         }
       } catch (e) {
         logError("Google Translate", "通信エラー", e.message);
@@ -416,25 +431,16 @@
 
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
-      if (!openAiKey || !historyList[targetIndex]) return;
-
-      const item = historyList[targetIndex];
-
-      if (item.lastProcessedText === fullText) return;
-
-      let textToProcess = fullText;
-      if (item.lastProcessedText && fullText.startsWith(item.lastProcessedText)) {
-        textToProcess = fullText.slice(item.lastProcessedText.length).trim();
+      if (!openAiKey || !historyList[targetIndex]) {
+        if (!openAiKey) logError("OpenAI", "Keyが未設定です");
+        return;
       }
 
-      if (!textToProcess || textToProcess.length < 3) return;
-
-      item.lastProcessedText = fullText;
+      const item = historyList[targetIndex];
 
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
 
-      // AI指示文の更新
       const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。相手の発言に対し、ユーザーがその場で口に出しやすい自然な返答英文（1文）とカタカナ読み、日本語訳を出力してください。
 
 【厳格ルール】
@@ -452,6 +458,7 @@
 I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェック ザ スケジュール] (スケジュールを確認したい)`;
 
       try {
+        logError("OpenAI", "送信中...", fullText);
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -464,7 +471,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
             max_tokens: 100,
             messages: [
               { role: 'system', content: systemPrompt },
-              { role: 'user', content: textToProcess }
+              { role: 'user', content: fullText }
             ]
           })
         });
@@ -473,16 +480,15 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           const data = await res.json();
           const newHint = data.choices[0]?.message?.content?.trim() || "";
 
-          // 回答ヒント表示形式の適用
           if (newHint && historyList[targetIndex]) {
-            if (!historyList[targetIndex].hint) {
-              historyList[targetIndex].hint = newHint;
-            } else {
-              historyList[targetIndex].hint += `\n➜ ${newHint}`;
-            }
+            historyList[targetIndex].hint = newHint;
+            logError("OpenAI", "取得成功", newHint);
             await updateDisplays();
-            setStatus('ヒント追記完了');
+            setStatus('ヒント生成完了');
           }
+        } else {
+          const errText = await res.text();
+          logError("OpenAI Error", `Status: ${res.status}`, errText);
         }
       } catch (e) {
         logError("OpenAI", "通信エラー", e.message);
@@ -490,7 +496,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
     }
 
     function triggerParallelProcessing(targetIndex, text) {
-      setStatus(`並列処理実行中...`);
+      setStatus(`和訳・ヒント処理実行中...`);
       fetchGoogleTranslationAsync(targetIndex, text);
       fetchOpenAiHintAsync(targetIndex, text);
     }
@@ -507,8 +513,8 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
         activeTotalBytes = 0;
       }
 
-      let targetIndex = -1;
-      let targetText = "";
+      let targetIndex = historyIndex;
+      let targetText = historyList[historyIndex]?.en || "";
 
       try {
         if (chunksToProcess.length > 0 && bytesToProcess >= 800) {
@@ -540,17 +546,12 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
 
             await updateDisplays();
           }
-        } else if (historyList.length > 0) {
-          targetIndex = historyIndex;
-          targetText = historyList[targetIndex].en;
         }
       } catch (e) {
-        if (historyList.length > 0) {
-          targetIndex = historyIndex;
-          targetText = historyList[targetIndex].en;
-        }
+        logError("ProcessQueue", "音声文字起こし失敗", e.message);
       } finally {
         isProcessing = false;
+        // 確定処理フラグ(isFinal)が立っており、対象の英文が存在する場合に並列呼び出しを発火
         if (isFinal && targetIndex >= 0 && targetText) {
           triggerParallelProcessing(targetIndex, targetText);
         }
@@ -724,7 +725,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           const textType = event.textEvent?.eventType;
 
           if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
-            processQueue(true, true);
+            forceSendPTT();
           }
 
           const evt = sysType || textType;
@@ -768,7 +769,13 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
       if (silenceTimer) clearTimeout(silenceTimer);
       silenceTimer = null;
       isProcessing = false;
-      processQueue(true, true);
+      
+      // バッファに未送信のデータがあれば送信処理を実行し、無ければ現在のテキストでAPIを呼び出す
+      if (activePcmChunks.length > 0) {
+        processQueue(true, true);
+      } else if (historyIndex >= 0 && historyList[historyIndex]) {
+        triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
+      }
     };
 
     initG2();
