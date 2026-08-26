@@ -414,7 +414,7 @@
       }
     }
 
-    // ★ 全単語カタカナ出力ルール（ルール3）を追加・最適化したOpenAIヒント生成
+    // ★ ご指定条件に完全対応したOpenAIプロンプト修正箇所
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) return;
@@ -435,21 +435,27 @@
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
 
-      const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。相手の発言に対し、ユーザーがその場で口に出しやすい自然な返答英文（1文）とカタカナ読み、日本語訳を出力してください。
+      const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。相手の発言に対して、最も適した自然な英語の返答ヒントを【肯定】と【否定】の2つのパターンで作成してください。
 
 【厳格ルール】
-1. 可変可能な単語（文脈でユーザーが自由に置き換えられる部分）には、以下の品詞タグを付与してください。
-   - [動可:xxx] : 単体で置換しても後ろの前置詞や文脈に影響を与えない動詞（他動詞など）
-   - [動不:xxx] : 前置詞とセットの熟語（例: waiting for）や型が固定された動詞句（置換不可）
-   - [形:xxx] : 形容詞（状態・気持ち）
-   - [副:xxx] : 副詞（程度・強調）
-   - [名:xxx] : 名詞（モノ・人・場所・時間）
-2. 置き換えによって前置詞と不整合を起こす表現は避け、他動詞を使用するか熟語セット [動不:xxx for] として一括出力してください。
-3. 【重要】カタカナ読みは、英文全体の最初から最後までの全単語を省略せずに正確にカタカナ表記してください。
-4. 全体で改行は極力減らし、コンパクトに30〜40文字程度で出力してください。
+1. 返答は「肯定的な回答」と「否定的な回答」の合計2つのみを作成してください。
+2. 1つ目の文頭には「肯：」、2つ目の文頭には「否：」と表示してください。
+3. 返答英文の長さは【15単語以内】としてください。
+4. 日本人が発音しにくい、または相手に誤解されやすい難解な単語は避け、明確で平易な単語を使用してください。
+5. ユーザーが置換可能な部分には、カッコを使わずに「品詞名: 単語」の形で直接表記してください（例: 動可: check / 名: schedule）。
+   - 品詞表記: 動可:（単体で置換可能）, 動不:（前置詞セットの熟語）, 形:, 副:, 名:
+6. 出力レイアウトは必ず各パターンにおいて以下の3行形式を守ってください：
+   1行目：肯：（または 否：） [英文]
+   2行目：[フリガナ（英文全体の全単語のカタカナ読み）]
+   3行目：（日本語訳）
 
-出力フォーマット例:
-I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェック ザ スケジュール] (スケジュールを確認したい)`;
+【出力フォーマット例】
+肯：I can 動可: check the 名: schedule right now.
+[アイ キャン チェック ザ スケジュール ライト ナウ]
+（今すぐスケジュールを確認できます）
+否：I am 動不: working on another 名: task right now.
+[アイ アム ワーキング オン アナザー タスク ライト ナウ]
+（今は別のタスクに対応中です）`;
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -461,7 +467,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 100,
+            max_tokens: 200,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: textToProcess }
@@ -474,11 +480,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           const newHint = data.choices[0]?.message?.content?.trim() || "";
 
           if (newHint && historyList[targetIndex]) {
-            if (!historyList[targetIndex].hint) {
-              historyList[targetIndex].hint = newHint;
-            } else {
-              historyList[targetIndex].hint += `\n➜ ${newHint}`;
-            }
+            historyList[targetIndex].hint = newHint;
             await updateDisplays();
             setStatus('ヒント追記完了');
           }
@@ -608,7 +610,6 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
       document.getElementById('preview-en').innerText = enText;
       document.getElementById('preview-ja').innerText = jaText;
 
-      // SDK文字数上限（安全値）でのトリミング処理
       if (enText.length > 300) enText = enText.slice(-300);
       if (jaText.length > 400) jaText = jaText.slice(-400);
 
