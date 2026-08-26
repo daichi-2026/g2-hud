@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.06 Custom Profile)</title>
+  <title>EVEN G2 Translator App (v5.07 Smart Reaction)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.06 Tagging</span>
+      <span class="version-badge" id="versionBadge">v5.07 Smart Reaction</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -223,7 +223,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.06 Tagging";
+    const APP_VERSION = "v5.07 Smart Reaction";
 
     let bridge = null;
     let currentMode = 1;
@@ -414,45 +414,50 @@
       }
     }
 
-    // ★ 短いフレーズ（即時切り出し）に対応した超低遅延プロンプト
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) return;
 
       const item = historyList[targetIndex];
 
-      // 全体文字列から「まだAIへ送っていない新しく増えた差分テキスト」だけを抽出
+      // 差分抽出
       let addedChunk = fullText;
       if (item.lastProcessedText && fullText.startsWith(item.lastProcessedText)) {
         addedChunk = fullText.slice(item.lastProcessedText.length).trim();
       } else if (item.lastProcessedText === fullText) {
-        return; // 変更なし
+        return;
       }
 
       if (!addedChunk || addedChunk.length < 2) return;
 
-      // 処理済み文字列を更新
       item.lastProcessedText = fullText;
 
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
 
+      // 相槌・軽い返答優先プロンプト
       const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。
-相手が話し始めた短いフレーズ（発言の断片・前半）に対して、遅延なく即座に返せる自然な英語の返答ヒントを作成してください。
+相手の発言（または途中のフレーズ）に対し、最も自然でテンポの良い【肯定】と【否定】の返答ヒントを作成してください。
 
-【厳格ルール】
-1. 肯定的な返答（1行目）と否定的な返答（2行目）の2つのみを作成してください。
-2. 改行ルール：
-   - 肯：の行、否：の行の内部では一切改行せず、英文・フリガナ（カタカナ）・和訳を半角スペース区切りで1行に詰めて出力してください。
-   - 肯：の行と否：の行の間のみ改行してください。
-3. 英文の長さは【15単語以内】とし、発音しやすく誤解の少ない平易な単語を選んでください。
-4. ユーザーが置換可能な部分には、カッコを使わずに「品詞名: 単語」の形で直接表記してください（例: 動可: check / 名: schedule）。
-   - 品詞表記: 動可:（単体で置換可能）, 動不:（前置詞セットの熟語）, 形:, 副:, 名:
-5. 全単語のカタカナ読み（フリガナ）は [ ] でくくってください。和訳は（ ）でくくってください。
+【出力判断ルール】
+1. **文の途中・雑談の導入・同意を求めるようなフレーズの場合**：
+   不自然なオウム返しやフルスピーチを行わず、「Yeah, totally.」「I know, right?」「Totally.」「Not really.」のような【1〜4単語程度の相槌・軽い同意・否定】を絶対優先してください。
+2. **具体的な質問・提案の場合**：
+   簡潔に答えられる15単語以内の文を作成してください。
 
-【出力フォーマット例】
-肯：I can 動可: check the 名: schedule right now. [アイ キャン チェック ザ スケジュール ライト ナウ] （今すぐスケジュールを確認できます）
-否：I am 動不: working on another 名: task right now. [アイ アム ワーキング オン アナザー タスク ライト ナウ] （今は別のタスクに対応中です）`;
+【フォーマット厳格ルール】
+- 肯定（1行目）と否定（2行目）の2行のみを出力。
+- 各行は一切改行せず、英文・カタカナ・和訳を半角スペース区切りで1行にまとめる。
+- カタカナは [ ]、和訳は（ ）で囲む。
+- 置換可能語句のみ「品詞名: 単語」表記（例: 動可: check / 名: schedule）。
+
+【出力例（導入・雑談時）】
+肯：Yeah, it really is. [ヤァ イット リアリー イズ] （そうですね、本当に）
+否：Not really, actually. [ノット リアリー アクチュアリィ] （そうでもないですよ）
+
+【出力例（質問時）】
+肯：I can 動可: check the 名: schedule. [アイ キャン チェック ザ スケジュール] （スケジュールを確認できます）
+否：I am 動不: busy with another 名: task. [アイ アム ビジィ ウィズ アナザー タスク] （別のタスクで忙しいです）`;
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -464,7 +469,7 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 150,
+            max_tokens: 80,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: addedChunk }
@@ -477,7 +482,6 @@
           const newHint = data.choices[0]?.message?.content?.trim() || "";
 
           if (newHint && historyList[targetIndex]) {
-            // ★ 上書きせず、既存のヒントの直後に改行して継ぎ足す（スタック）
             if (historyList[targetIndex].hint) {
               historyList[targetIndex].hint += "\n" + newHint;
             } else {
