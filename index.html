@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.00 Google Direct - Speed Optimized)</title>
+  <title>EVEN G2 Translator App (v5.00 Fast - Auto Save Keys)</title>
   <style>
     body {
       background-color: #111;
@@ -234,6 +234,21 @@
     let historyList = [];
     let historyIndex = -1;
 
+    // --- ★ Edge(localStorage) キー自動保存・自動読み込み処理 ---
+    function initKeyStorage() {
+      const gEl = document.getElementById('googleKey');
+      const dEl = document.getElementById('deepgramKey');
+      const oEl = document.getElementById('apiKey');
+
+      if (gEl) gEl.value = localStorage.getItem('google_api_key') || '';
+      if (dEl) dEl.value = localStorage.getItem('deepgram_api_key') || '';
+      if (oEl) oEl.value = localStorage.getItem('openai_api_key') || '';
+
+      if (gEl) gEl.addEventListener('input', (e) => localStorage.setItem('google_api_key', e.target.value.trim()));
+      if (dEl) dEl.addEventListener('input', (e) => localStorage.setItem('deepgram_api_key', e.target.value.trim()));
+      if (oEl) oEl.addEventListener('input', (e) => localStorage.setItem('openai_api_key', e.target.value.trim()));
+    }
+
     function getInputValue(id) {
       const el = document.getElementById(id);
       return el ? el.value.trim() : "";
@@ -411,7 +426,6 @@
       }
     }
 
-    // ★ トークン数を拡張(150)し、英語・カタカナ・日本語訳を最後まで出力させる修正版
     async function fetchOpenAiHintAsync(targetIndex, text) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey) {
@@ -429,7 +443,7 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 150, // 途切れ防止のため 60 -> 150 に拡大
+            max_tokens: 150,
             messages: [
               {
                 role: 'system',
@@ -630,6 +644,9 @@
     });
 
     async function initG2() {
+      // 画面ロード時に自動読み込み初期化
+      initKeyStorage();
+
       try {
         setStatus(`接続中... [${APP_VERSION}]`);
         bridge = await waitForEvenAppBridge();
