@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.07 Stream & Auto Finalize)</title>
+  <title>EVEN G2 Translator App (v5.07 Stream)</title>
   <style>
     body {
       background-color: #111;
@@ -434,6 +434,7 @@
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
 
+      // AI指示文の更新
       const systemPrompt = `${profileContext}あなたはリアルタイム英会話アシスタントです。相手の発言に対し、ユーザーがその場で口に出しやすい自然な返答英文（1文）とカタカナ読み、日本語訳を出力してください。
 
 【厳格ルール】
@@ -472,6 +473,7 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           const data = await res.json();
           const newHint = data.choices[0]?.message?.content?.trim() || "";
 
+          // 回答ヒント表示形式の適用
           if (newHint && historyList[targetIndex]) {
             if (!historyList[targetIndex].hint) {
               historyList[targetIndex].hint = newHint;
@@ -549,7 +551,6 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
         }
       } finally {
         isProcessing = false;
-        // 無音判定(silenceTimer)などにより isFinal = true となったタイミングで和訳・ヒントを生成
         if (isFinal && targetIndex >= 0 && targetText) {
           triggerParallelProcessing(targetIndex, targetText);
         }
@@ -561,7 +562,6 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
       const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 80;
 
       if (rms >= threshold) {
-        // 発声検知時は無音確定タイマーをリセット
         if (silenceTimer) {
           clearTimeout(silenceTimer);
           silenceTimer = null;
@@ -582,7 +582,6 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           const accumulatedKB = (activeTotalBytes / 1024).toFixed(1);
           setStatus(`音声検出中... (${accumulatedKB} KB)`);
 
-          // 300ms間隔でリアルタイムに文字起こし＆英文描画を更新
           if (!chunkTimer) {
             chunkTimer = setTimeout(() => {
               chunkTimer = null;
@@ -591,7 +590,6 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           }
         }
       } else {
-        // 無音区間に入った場合
         if (activePcmChunks.length === 0) {
           preRingBuffer.push(normalized);
           if (preRingBuffer.length > MAX_PRE_BUFFER) {
@@ -599,7 +597,6 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
           }
         } else if (currentMode === 1 && !silenceTimer) {
           const silenceDuration = parseInt(document.getElementById('silenceDuration').value, 10) || 1200;
-          // 一息ついた無音（指定時間）を検知したら確定処理を行い、和訳・ヒントの自動生成へ
           silenceTimer = setTimeout(() => {
             silenceTimer = null;
             setStatus("無音検知 ➜ 確定処理・翻訳開始");
@@ -616,7 +613,6 @@ I want to [動可:check] the [名:schedule]. [アイ ウォント トゥ チェ�
       document.getElementById('preview-en').innerText = enText;
       document.getElementById('preview-ja').innerText = jaText;
 
-      // SDK文字数上限（安全値）でのトリミング処理
       if (enText.length > 300) enText = enText.slice(-300);
       if (jaText.length > 400) jaText = jaText.slice(-400);
 
