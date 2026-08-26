@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.00 Google Translate Direct)</title>
+  <title>EVEN G2 Translator App (v5.00 Google Direct - Speed Optimized)</title>
   <style>
     body {
       background-color: #111;
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.00 Google Direct</span>
+      <span class="version-badge" id="versionBadge">v5.00 Fast</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -213,7 +213,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.00 Google Direct";
+    const APP_VERSION = "v5.00 Fast";
 
     let bridge = null;
     let currentMode = 1;
@@ -369,7 +369,6 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    // ★ Google Translate API 直接呼び出し（Worker不要）
     async function fetchGoogleTranslationAsync(targetIndex, text) {
       const googleKey = getInputValue('googleKey');
       if (!googleKey) {
@@ -412,6 +411,7 @@
       }
     }
 
+    // ★ 速度最適化版 OpenAI ヒント生成（gpt-4o-mini + 最短プロンプト）
     async function fetchOpenAiHintAsync(targetIndex, text) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey) {
@@ -427,17 +427,13 @@
             'Authorization': `Bearer ${openAiKey}`
           },
           body: JSON.stringify({
-            model: 'gpt-4o-mini',
+            model: 'gpt-4o-mini', // 爆速モデルに変更
             temperature: 0.3,
-            max_tokens: 150,
+            max_tokens: 60,       // 文字数を最小限に絞り応答時間を削る
             messages: [
               {
                 role: 'system',
-                content: `相手の英語発言に対する「自然な返答ヒント」を3行で出力してください。解説は不要です。
-
-(短く返す英語)
-(カタカナフリガナ)
-(日本語訳)`
+                content: '会話アシスタントです。相手の発言に対する自然な返答フレーズを英語で1つだけ、カタカナの読みと日本語訳を添えて最短で出力してください。挨拶や前置き、解説は一切不要です。'
               },
               { role: 'user', content: text }
             ]
