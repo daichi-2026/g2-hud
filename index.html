@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v3.5 Continuous Stream)</title>
+  <title>EVEN G2 Translator App (v3.6 Async Render)</title>
   <style>
     body {
       background-color: #111;
@@ -125,14 +125,14 @@
 
   <div class="glass-container">
     <div class="mode-tab-bar">
-      <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 連続リアルタイム</div>
+      <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 連続即時描画</div>
       <div id="tab2" class="mode-tab" onclick="switchMode(2)">2: PTT (押して送信)</div>
     </div>
 
     <div id="glass-display">
       <div id="mode1Screen" class="hud-mode-screen active">
         <div style="display:flex; justify-content:space-between; align-items:center;">
-          <div style="color:#00FF00; font-size:10px; font-weight:bold;">連続ストリーミング (↑/↓で履歴)</div>
+          <div style="color:#00FF00; font-size:10px; font-weight:bold;">即時描画ストリーミング (↑/↓で履歴)</div>
           <div>
             <button class="nav-btn" onclick="navigateHistory('up')">▲ 前へ</button>
             <button class="nav-btn" onclick="navigateHistory('down')">▼ 次へ</button>
@@ -163,7 +163,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v3.5 (連続追記対応)</span>
+      <span class="version-badge" id="versionBadge">v3.6 (即時描画対応)</span>
     </h2>
     <div>
       <label>Deepgram API Key (文字起こし):</label>
@@ -184,8 +184,9 @@
     </div>
 
     <div>
-      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.5</span>秒</label>
-      <input type="range" id="silenceSec" min="0.2" max="2.0" step="0.1" value="0.5" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <label>無音判定タイマー (秒): <span id="silenceSecVal">0.3</span>秒</label>
+      <input type="range" id="silenceSec" min="0.1" max="1.5" step="0.05" value="0.3" style="width:100%;" oninput="document.getElementById('silenceSecVal').innerText = this.value" />
+      <div style="font-size:10px; color:#888;">※小刻みな即時描画のため 0.3秒 を推奨</div>
     </div>
 
     <div style="border-top:1px solid #333; margin:5px 0;"></div>
@@ -206,7 +207,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v3.5 (連続追記対応)";
+    const APP_VERSION = "v3.6 (即時描画対応)";
     const WORKER_URL = "https://blue-night-af7c.leoa1000xbd.workers.dev/";
 
     let bridge = null;
@@ -221,7 +222,6 @@
     let isProcessing = false;
     let silenceTimer = null;
 
-    // 会話セッション管理用
     let currentEnSession = [];
     let currentJaSession = [];
     let sessionLastTime = 0;
@@ -362,33 +362,48 @@
           console.warn("Workers DeepL Failed:", e);
         }
       }
-
-      const openAiKey = document.getElementById('apiKey').value.trim();
-      if (openAiKey) {
-        try {
-          const res = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openAiKey}`
-            },
-            body: JSON.stringify({
-              model: 'gpt-4o-mini',
-              temperature: 0.1,
-              messages: [
-                { role: 'system', content: '入力された英語を自然な日本語に翻訳し、翻訳文のみを出力してください。' },
-                { role: 'user', content: text }
-              ]
-            })
-          });
-          if (res.ok) {
-            const data = await res.json();
-            return data.choices[0].message.content.trim();
-          }
-        } catch (e) {}
-      }
-
       return "（翻訳取得エラー）";
+    }
+
+    // バックグラウンドでOpenAIヒントを生成して画面更新する非同期関数
+    async function generateOpenAiHintAsync(targetIndex, fullEnText, fullJaText) {
+      const openAiKey = document.getElementById('apiKey').value.trim();
+      if (!openAiKey) return;
+
+      try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openAiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            temperature: 0.2,
+            max_tokens: 150,
+            messages: [
+              {
+                role: 'system',
+                content: `英語の発言に対し、短く返答するヒントを3行で出力してください。\n(短い英語)\n(カタカナフリガナ)\n(日本語訳)`
+              },
+              { role: 'user', content: fullEnText }
+            ]
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const hintText = data.choices[0]?.message?.content?.trim() || "";
+          
+          // 該当インデックスの表示内容をヒント付きで上書き更新
+          if (historyList[targetIndex]) {
+            historyList[targetIndex] = `【相手】\n${fullEnText}\n${fullJaText}\n-------------------\n【返答ヒント】\n${hintText}`;
+            await updateDisplays();
+          }
+        }
+      } catch (e) {
+        console.error("Async OpenAI Error:", e);
+      }
     }
 
     async function processQueue() {
@@ -411,7 +426,6 @@
           const jaTranslation = await translateText(enText);
 
           const now = Date.now();
-          // 8秒以上間隔が空いた場合は新しい履歴枠に分離、それ以内なら継ぎ足し
           if (now - sessionLastTime > 8000 || currentEnSession.length === 0) {
             currentEnSession = [enText];
             currentJaSession = [jaTranslation];
@@ -424,7 +438,11 @@
           const fullEn = currentEnSession.join(' ');
           const fullJa = currentJaSession.join(' ');
 
-          let currentContent = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n生成中...`;
+          const openAiKey = document.getElementById('apiKey').value.trim();
+          const initialHintLabel = openAiKey ? "（準備中...）" : "（OpenAI Key未設定）";
+
+          // 1. DeepLの翻訳結果までを最優先で「即時描画」
+          let currentContent = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n${initialHintLabel}`;
 
           if (now - sessionLastTime > 8000 || historyList.length === 0) {
             historyList.push(currentContent);
@@ -433,40 +451,15 @@
           }
           historyIndex = historyList.length - 1;
 
+          // 一刻も早くグラス描画を更新
           await updateDisplays();
+          setStatus('待機中');
 
-          // OpenAI 返答ヒント更新
-          const openAiKey = document.getElementById('apiKey').value.trim();
+          // 2. OpenAIの返答ヒントはバックグラウンド非同期処理に切り離す
           if (openAiKey) {
-            fetch('https://api.openai.com/v1/chat/completions', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${openAiKey}`
-              },
-              body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                temperature: 0.2,
-                max_tokens: 150,
-                messages: [
-                  {
-                    role: 'system',
-                    content: `英語の発言に対し、短く返答するヒントを3行で出力してください。\n(短い英語)\n(カタカナフリガナ)\n(日本語訳)`
-                  },
-                  { role: 'user', content: fullEn }
-                ]
-              })
-            }).then(res => res.json()).then(async data => {
-              const hintText = data.choices[0]?.message?.content?.trim() || "";
-              historyList[historyIndex] = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n${hintText}`;
-              await updateDisplays();
-            }).catch(() => {});
-          } else {
-            historyList[historyIndex] = `【相手】\n${fullEn}\n${fullJa}\n-------------------\n【返答ヒント】\n（OpenAI Key未設定）`;
-            await updateDisplays();
+            generateOpenAiHintAsync(historyIndex, fullEn, fullJa);
           }
 
-          setStatus('待機中');
         } else {
           setStatus(`待機中`);
         }
@@ -475,7 +468,6 @@
         setStatus('エラー: ' + e.message);
       } finally {
         isProcessing = false;
-        // 未処理のバッファが残っていれば即座に再実行
         if (activeTotalBytes >= 1200) {
           processQueue();
         }
@@ -503,7 +495,7 @@
 
           if (silenceTimer) clearTimeout(silenceTimer);
           
-          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 500;
+          const silenceMs = parseFloat(document.getElementById('silenceSec').value) * 1000 || 300;
           silenceTimer = setTimeout(() => {
             if (currentMode === 1) {
               processQueue();
