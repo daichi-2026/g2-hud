@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.17-FIX)</title>
+  <title>EVEN G2 Translator App (v5.19-FIX)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.17-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.19-FIX</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -187,10 +187,15 @@
       <textarea id="userProfile" rows="2" placeholder="例: 経理財務 / 丁寧かつ結論ファースト / 趣味: 読書 / 返答方針: 簡潔に" style="width:100%; box-sizing:border-box;"></textarea>
     </div>
     
+    <div>
+      <label>マイク感度: <span id="thresholdVal">80</span></label>
+      <input type="range" id="noiseThreshold" min="20" max="1000" value="80" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+    </div>
+
     <div style="display:flex; gap:10px;">
       <div style="flex:1;">
-        <label>マイク感度: <span id="thresholdVal">80</span></label>
-        <input type="range" id="noiseThreshold" min="20" max="1000" value="80" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+        <label>途中送信間隔: <span id="chunkVal">1500</span>ms</label>
+        <input type="range" id="chunkDuration" min="500" max="3000" step="100" value="1500" style="width:100%;" oninput="document.getElementById('chunkVal').innerText = this.value" />
       </div>
       <div style="flex:1;">
         <label>無音確定時間: <span id="silenceVal">1200</span>ms</label>
@@ -210,7 +215,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.17-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.19-FIX] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -222,7 +227,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.17-FIX";
+    const APP_VERSION = "v5.19-FIX";
 
     let bridge = null;
     let currentMode = 1;
@@ -238,7 +243,6 @@
     let chunkTimer = null;
     let isSpeaking = false;
 
-    // 履歴管理：Array<{ chunks: Array<{en, ja, hint, isFinal}> }>
     let historyList = [];
     let historyIndex = -1;
 
@@ -366,19 +370,9 @@
       }
     }
 
-    function isNoiseOrFiller(text) {
-      if (!text) return true;
-      const clean = text.trim().toLowerCase().replace(/[^a-z]/g, '');
-      const fillers = ['thankyou', 'thanks', 'you', 'mb', 'bye', 'a', 'the'];
-      return clean.length <= 1 || fillers.includes(clean);
-    }
-
     async function transcribeWithDeepgram(wavBlob) {
       const deepgramKey = getInputValue('deepgramKey');
-      if (!deepgramKey) {
-        logError("Deepgram", "Keyが空です");
-        throw new Error("Deepgram Key未設定");
-      }
+      if (!deepgramKey) return "";
 
       const url = 'https://api.deepgram.com/v1/listen?model=nova-2&language=en&smart_format=true&punctuate=true';
       const response = await fetch(url, {
@@ -391,9 +385,8 @@
       });
 
       if (!response.ok) {
-        const errText = await response.text();
-        logError("Deepgram API Error", `Status: ${response.status}`, errText);
-        throw new Error(`Deepgram Error (${response.status})`);
+        logError("Deepgram API Error", `Status: ${response.status}`);
+        return "";
       }
       const data = await response.json();
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
@@ -447,27 +440,7 @@
 ・挨拶・天気・近況・相槌の場合：
   1〜5単語程度の自然で短いフレーズにする。オウム返しや無用な長文は避ける。
 ・5W1H質問・意見を求められた場合：
-  5〜10単語程度で明確に意思表示できる文章にする。
-
-【出力例1：句動詞・動詞タグ・表記ルール】
-入力: "Can you handle this project?"
-出力:
-I can 動可:take it.
-[アイ キャン テイク イット]
-(引き受けられます)
-I'll 動不:look into it.
-[アイル ルック イントゥー イット]
-(確認してみます)
-
-【出力例2：挨拶・世間話・導入】
-入力: "It's so hot today, isn't it? How have you been?"
-出力:
-Yeah, it's 形:tough.
-[イェア イッツ タフ]
-(本当ですね、きついですね)
-Pretty 形:good, thanks!
-[プリティ グッド サンクス]
-(元気にやってますよ、ありがとう！)`;
+  5〜10単語程度で明確に意思表示できる文章にする。`;
 
       try {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -502,9 +475,8 @@ Pretty 形:good, thanks!
       }
     }
 
-    // 重複を厳格に弾くチャンク解析処理
     function parseAndProcessChunks(rawText, isFinal = false) {
-      if (!rawText) return;
+      if (!rawText || rawText.length < 2) return;
 
       if (historyList.length === 0) {
         historyList.push({ chunks: [] });
@@ -513,13 +485,6 @@ Pretty 形:good, thanks!
 
       const currentItem = historyList[historyList.length - 1];
       const cleanText = rawText.trim();
-
-      // ★重複ガード: 直近確定済みテキストと同じ、または含む場合は即時破棄
-      const lastChunk = currentItem.chunks[currentItem.chunks.length - 1];
-      if (lastChunk && (lastChunk.en === cleanText || cleanText.startsWith(lastChunk.en))) {
-        if (isFinal) lastChunk.isFinal = true;
-        return;
-      }
 
       let targetChunk = currentItem.chunks.find(c => !c.isFinal);
 
@@ -530,7 +495,7 @@ Pretty 形:good, thanks!
         targetChunk.en = cleanText;
       }
 
-      if (isFinal || /[,.?!]$/.test(cleanText)) {
+      if (isFinal) {
         targetChunk.isFinal = true;
         const chunkIdx = currentItem.chunks.indexOf(targetChunk);
         const historyIdx = historyList.length - 1;
@@ -545,30 +510,29 @@ Pretty 形:good, thanks!
       updateDisplays();
     }
 
-    async function processQueue(isFinal = false, clearBuffer = true) {
+    async function processQueue(isFinal = false) {
       if (isProcessing) return;
-
       isProcessing = true;
+
       const chunksToProcess = [...activePcmChunks];
       const bytesToProcess = activeTotalBytes;
 
-      // ★送信毎に音声バッファをリセット（重複送信の根絶）
-      if (clearBuffer) {
+      if (isFinal) {
         activePcmChunks = [];
         activeTotalBytes = 0;
       }
 
       try {
-        if (chunksToProcess.length > 0 && bytesToProcess >= 800) {
+        if (chunksToProcess.length > 0 && bytesToProcess >= 1600) {
           const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
           let enText = await transcribeWithDeepgram(wavBlob);
 
-          if (!isNoiseOrFiller(enText)) {
+          if (enText) {
             parseAndProcessChunks(enText, isFinal);
           }
         }
       } catch (e) {
-        logError("ProcessQueue", "音声文字起こし失敗", e.message);
+        logError("ProcessQueue", "エラー", e.message);
       } finally {
         isProcessing = false;
       }
@@ -601,10 +565,11 @@ Pretty 形:good, thanks!
           setStatus(`音声検出中... (${accumulatedKB} KB)`);
 
           if (!chunkTimer) {
+            const chunkDuration = parseInt(document.getElementById('chunkDuration').value, 10) || 1500;
             chunkTimer = setTimeout(() => {
               chunkTimer = null;
-              processQueue(false, true); // バッファを消費・リセットして途中送信
-            }, 600);
+              processQueue(false);
+            }, chunkDuration);
           }
         }
       } else {
@@ -621,10 +586,8 @@ Pretty 形:good, thanks!
               isSpeaking = false;
               setStatus("無音確定 ➜ 文節確定");
               
-              // ★最終送信してバッファクリア
-              processQueue(true, true);
+              processQueue(true);
 
-              // 新しい発話ブロック用の枠を用意
               if (historyList.length > 0 && historyList[historyList.length - 1].chunks.length > 0) {
                 historyList.push({ chunks: [] });
                 historyIndex = historyList.length - 1;
@@ -807,7 +770,7 @@ Pretty 形:good, thanks!
       silenceTimer = null;
       isSpeaking = false;
       isProcessing = false;
-      processQueue(true, true);
+      processQueue(true);
     };
 
     initG2();
