@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.19-FIX)</title>
+  <title>EVEN G2 Translator App (v5.20-FIX)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.19-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.20-FIX</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -203,7 +203,7 @@
       </div>
     </div>
 
-    <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信</button>
+    <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信（文章確定）</button>
     <button onclick="clearHistory()" style="background:#cc3333;">🗑️ 履歴をクリア</button>
     
     <div style="border-top:1px solid #333; margin:2px 0;"></div>
@@ -215,7 +215,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.19-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.20-FIX] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -227,7 +227,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.19-FIX";
+    const APP_VERSION = "v5.20-FIX";
 
     let bridge = null;
     let currentMode = 1;
@@ -241,7 +241,6 @@
     let isProcessing = false;
     let silenceTimer = null;
     let chunkTimer = null;
-    let isSpeaking = false;
 
     let historyList = [];
     let historyIndex = -1;
@@ -443,6 +442,7 @@
   5〜10単語程度で明確に意思表示できる文章にする。`;
 
       try {
+        setStatus('AIヒント生成中...');
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -467,7 +467,7 @@
           if (newHint && historyList[historyIdx]?.chunks[chunkIdx]) {
             historyList[historyIdx].chunks[chunkIdx].hint = newHint;
             await updateDisplays();
-            setStatus('ヒント生成完了');
+            setStatus('処理完了・待機中');
           }
         }
       } catch (e) {
@@ -500,7 +500,7 @@
         const chunkIdx = currentItem.chunks.indexOf(targetChunk);
         const historyIdx = historyList.length - 1;
 
-        logError("Chunk確定", `[${historyIdx}][${chunkIdx}] ${cleanText}`);
+        logError("文節確定", `[${historyIdx}][${chunkIdx}] ${cleanText}`);
         fetchGoogleTranslationAsync(historyIdx, chunkIdx, cleanText);
 
         const fullContext = currentItem.chunks.map(c => c.en).join(' ');
@@ -511,7 +511,7 @@
     }
 
     async function processQueue(isFinal = false) {
-      if (isProcessing) return;
+      if (isProcessing && !isFinal) return;
       isProcessing = true;
 
       const chunksToProcess = [...activePcmChunks];
@@ -543,7 +543,7 @@
       const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 80;
 
       if (rms >= threshold) {
-        isSpeaking = true;
+        // 発声中: 無音タイマーをリセット
         if (silenceTimer) {
           clearTimeout(silenceTimer);
           silenceTimer = null;
@@ -573,18 +573,23 @@
           }
         }
       } else {
+        // 無音時
         if (activePcmChunks.length === 0) {
           preRingBuffer.push(normalized);
           if (preRingBuffer.length > MAX_PRE_BUFFER) {
             preRingBuffer.shift();
           }
         } else if (currentMode === 1) {
-          if (isSpeaking && !silenceTimer) {
+          // 音声バッファがある状態で無音を検知した場合、無音タイマーを開始
+          if (!silenceTimer) {
             const silenceDuration = parseInt(document.getElementById('silenceDuration').value, 10) || 1200;
             silenceTimer = setTimeout(() => {
               silenceTimer = null;
-              isSpeaking = false;
-              setStatus("無音確定 ➜ 文節確定");
+              if (chunkTimer) {
+                clearTimeout(chunkTimer);
+                chunkTimer = null;
+              }
+              setStatus("無音確定 ➜ 文言確定中...");
               
               processQueue(true);
 
@@ -649,9 +654,10 @@
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
-      isSpeaking = false;
       if (silenceTimer) clearTimeout(silenceTimer);
+      if (chunkTimer) clearTimeout(chunkTimer);
       silenceTimer = null;
+      chunkTimer = null;
       await updateDisplays();
       setStatus('履歴クリア');
     };
@@ -757,9 +763,10 @@
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
-      isSpeaking = false;
       if (silenceTimer) clearTimeout(silenceTimer);
+      if (chunkTimer) clearTimeout(chunkTimer);
       silenceTimer = null;
+      chunkTimer = null;
       isProcessing = false;
       updateUIOnly(currentMode);
       updateDisplays();
@@ -767,8 +774,9 @@
 
     window.forceSendPTT = function() {
       if (silenceTimer) clearTimeout(silenceTimer);
+      if (chunkTimer) clearTimeout(chunkTimer);
       silenceTimer = null;
-      isSpeaking = false;
+      chunkTimer = null;
       isProcessing = false;
       processQueue(true);
     };
