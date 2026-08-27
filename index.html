@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.16-FIX)</title>
+  <title>EVEN G2 Translator App (v5.17-FIX)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.16-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.17-FIX</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -210,7 +210,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.16-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.17-FIX] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -222,7 +222,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.16-FIX";
+    const APP_VERSION = "v5.17-FIX";
 
     let bridge = null;
     let currentMode = 1;
@@ -502,7 +502,7 @@ Pretty 形:good, thanks!
       }
     }
 
-    // 句読点によるリアルタイム・ストリーミング解析（重複防止修正版）
+    // 重複を厳格に弾くチャンク解析処理
     function parseAndProcessChunks(rawText, isFinal = false) {
       if (!rawText) return;
 
@@ -514,14 +514,19 @@ Pretty 形:good, thanks!
       const currentItem = historyList[historyList.length - 1];
       const cleanText = rawText.trim();
 
-      // 現在のセッション内で未確定のチャンクを取得（なければ新規作成）
+      // ★重複ガード: 直近確定済みテキストと同じ、または含む場合は即時破棄
+      const lastChunk = currentItem.chunks[currentItem.chunks.length - 1];
+      if (lastChunk && (lastChunk.en === cleanText || cleanText.startsWith(lastChunk.en))) {
+        if (isFinal) lastChunk.isFinal = true;
+        return;
+      }
+
       let targetChunk = currentItem.chunks.find(c => !c.isFinal);
 
       if (!targetChunk) {
         targetChunk = { en: cleanText, ja: "", hint: "", isFinal: false };
         currentItem.chunks.push(targetChunk);
       } else {
-        // 同じ内容で重複追加されるのを防ぐため、単に最新テキストで上書きする
         targetChunk.en = cleanText;
       }
 
@@ -540,13 +545,14 @@ Pretty 形:good, thanks!
       updateDisplays();
     }
 
-    async function processQueue(isFinal = false, clearBuffer = false) {
+    async function processQueue(isFinal = false, clearBuffer = true) {
       if (isProcessing) return;
 
       isProcessing = true;
       const chunksToProcess = [...activePcmChunks];
       const bytesToProcess = activeTotalBytes;
 
+      // ★送信毎に音声バッファをリセット（重複送信の根絶）
       if (clearBuffer) {
         activePcmChunks = [];
         activeTotalBytes = 0;
@@ -597,8 +603,8 @@ Pretty 形:good, thanks!
           if (!chunkTimer) {
             chunkTimer = setTimeout(() => {
               chunkTimer = null;
-              processQueue(false, false);
-            }, 400);
+              processQueue(false, true); // バッファを消費・リセットして途中送信
+            }, 600);
           }
         }
       } else {
@@ -614,9 +620,11 @@ Pretty 形:good, thanks!
               silenceTimer = null;
               isSpeaking = false;
               setStatus("無音確定 ➜ 文節確定");
+              
+              // ★最終送信してバッファクリア
               processQueue(true, true);
 
-              // 新しい発話単位用に準備
+              // 新しい発話ブロック用の枠を用意
               if (historyList.length > 0 && historyList[historyList.length - 1].chunks.length > 0) {
                 historyList.push({ chunks: [] });
                 historyIndex = historyList.length - 1;
