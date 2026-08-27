@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.10-REQ)</title>
+  <title>EVEN G2 Translator App (v5.11-REQ)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.10-REQ</span>
+      <span class="version-badge" id="versionBadge">v5.11-REQ</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -210,7 +210,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.10-REQ] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.11-REQ] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -222,7 +222,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.10-REQ";
+    const APP_VERSION = "v5.11-REQ";
 
     let bridge = null;
     let currentMode = 1;
@@ -436,29 +436,40 @@
       }
 
       const userProfileKeywords = getInputValue('userProfile');
-      const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
+      const profileContext = userProfileKeywords ? `【ユーザー思考プロファイル】\n${userProfileKeywords}\n` : '';
 
-      const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。スマートグラス（視界ディスプレイ）に表示するため、相手の発話の性質（雑談・質問・5W1Hなど）に応じた最適な回答ヒントを2パターン生成してください。
+      const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。相手の発言文脈を自動判別し、スマートグラス表示用の英語返答ヒントを生成してください。
 
-【出力の自動判定ルール】
-1. 挨拶・相槌・軽めの雑談・発話途中の場合：
-   - 会話テンポを最優先し、目線を奪わない超短文（10単語以内）やシンプルな相槌・頷き入りの返答を作成すること。
-2. Yes/Noで答える質問・提案の場合：
-   - 「肯：」「否：」の2パターン（各1行）を生成すること。
-3. 5W1H（Who/What/When/Where/Why/How）や意見を求める質問の場合：
-   - 肯定/否定ではなく、状況に応じた「代表的な回答2パターン（案A / 案B）」を生成すること。
+【出力構造ルール（絶対順守）】
+1. 必ず「返答案1」と「返答案2」の2パターンを提示すること。
+2. 構成要素は絶対に「英語本文」「[カタカナルビ]」「(日本語訳)」の3要素セットとし、英語やルビを省略してはならない。
+3. 可変単語（品詞タグ）がある場合は [名:word] や [形:word] のように表記すること。
 
-【厳格なフォーマットルール（6つの要望遵守）】
-・回答案は必ず2パターン（「肯：/否：」または「案A：/案B：」）を両方出力すること。
-・各案のすぐ下に、カタカナの発音ルビと(日本語訳)を配置すること。
-・単語の変更・置き換え可能箇所のみ「[形:good]」「[名:office]」のように品詞と標準語句を明示すること。
-・グラスの横幅制限を考慮し、無駄な長文を避け視認性を高く保つこと。
+【文脈に応じた柔軟な長さ制御】
+・挨拶・天気・近況・相槌の場合：
+  1〜5単語程度の自然で短いフレーズにする。オウム返しや無用な長文は避ける。
+・5W1H質問・意見を求められた場合：
+  5〜10単語程度で明確に意思表示できる文章にする。
 
-【出力イメージ（5W1H質問の場合）】
-案A：I'm working at the [名:office] today. (今日はオフィスで働いています)
+【出力例1：挨拶・世間話・導入】
+入力: "It's already late August, but it's still so hot, isn't it? How have you been lately?"
+出力:
+Yeah, it's [形:tough].
+[イェア イッツ タフ]
+(本当ですね、きついですね)
+Pretty [形:good], thanks!
+[プリティ グッド サンクス]
+(元気にやってますよ、ありがとう！)
+
+【出力例2：質問】
+入力: "Where are you working today?"
+出力:
+I'm working at the [名:office] today.
 [アイム ワーキング アット ザ オフィス トゥデイ]
-案B：I'm working from [名:home] today. (今日は在宅勤務です)
-[アイム ワーキング フロム ホーム トゥデイ]`;
+(今日はオフィス勤務です)
+I'm working from [名:home] today.
+[アイム ワーキング フロム ホーム トゥデイ]
+(今日は在宅勤務です)`;
 
       try {
         logError("OpenAI", "送信中...", fullText);
@@ -471,7 +482,7 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 150,
+            max_tokens: 160,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: fullText }
