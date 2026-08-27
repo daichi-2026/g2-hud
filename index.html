@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.11-REQ)</title>
+  <title>EVEN G2 Translator App (v5.12-REQ)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.11-REQ</span>
+      <span class="version-badge" id="versionBadge">v5.12-REQ</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -210,7 +210,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.11-REQ] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.12-REQ] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -222,7 +222,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.11-REQ";
+    const APP_VERSION = "v5.12-REQ";
 
     let bridge = null;
     let currentMode = 1;
@@ -443,7 +443,11 @@
 【出力構造ルール（絶対順守）】
 1. 必ず「返答案1」と「返答案2」の2パターンを提示すること。
 2. 構成要素は絶対に「英語本文」「[カタカナルビ]」「(日本語訳)」の3要素セットとし、英語やルビを省略してはならない。
-3. 可変単語（品詞タグ）がある場合は [名:word] や [形:word] のように表記すること。
+3. 可変単語の表記ルール（角カッコ[]は絶対に含めず、漢字とコロンのみで表記すること）：
+   - 名詞: 名:word
+   - 形容詞: 形:word
+   - 単体で自由に変更可能な動詞: 動可:word
+   - 句動詞や固定表現（前置詞等を含めセットで固定しないと文法エラーになる動詞句）: 動不:verb prep
 
 【文脈に応じた柔軟な長さ制御】
 ・挨拶・天気・近況・相槌の場合：
@@ -451,25 +455,25 @@
 ・5W1H質問・意見を求められた場合：
   5〜10単語程度で明確に意思表示できる文章にする。
 
-【出力例1：挨拶・世間話・導入】
-入力: "It's already late August, but it's still so hot, isn't it? How have you been lately?"
+【出力例1：句動詞・動詞タグ・表記ルール】
+入力: "Can you handle this project?"
 出力:
-Yeah, it's [形:tough].
+I can 動可:take it.
+[アイ キャン テイク イット]
+(引き受けられます)
+I'll 動不:look into it.
+[アイル ルック イントゥー イット]
+(確認してみます)
+
+【出力例2：挨拶・世間話・導入】
+入力: "It's so hot today, isn't it? How have you been?"
+出力:
+Yeah, it's 形:tough.
 [イェア イッツ タフ]
 (本当ですね、きついですね)
-Pretty [形:good], thanks!
+Pretty 形:good, thanks!
 [プリティ グッド サンクス]
-(元気にやってますよ、ありがとう！)
-
-【出力例2：質問】
-入力: "Where are you working today?"
-出力:
-I'm working at the [名:office] today.
-[アイム ワーキング アット ザ オフィス トゥデイ]
-(今日はオフィス勤務です)
-I'm working from [名:home] today.
-[アイム ワーキング フロム ホーム トゥデイ]
-(今日は在宅勤務です)`;
+(元気にやってますよ、ありがとう！)`;
 
       try {
         logError("OpenAI", "送信中...", fullText);
@@ -528,7 +532,6 @@ I'm working from [名:home] today.
       }
 
       let targetIndex = -1;
-      let targetText = "";
 
       try {
         if (chunksToProcess.length > 0 && bytesToProcess >= 800) {
@@ -556,7 +559,6 @@ I'm working from [名:home] today.
             
             historyIndex = historyList.length - 1;
             targetIndex = historyIndex;
-            targetText = fullEn;
 
             await updateDisplays();
           }
