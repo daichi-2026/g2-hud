@@ -441,11 +441,12 @@
       const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。相手の発言に対し、最も適した自然な回答ヒントを生成してください。
 
 【厳格な指示ルール】
-1. 回答ヒントの提案は2つだけ（1段目は肯定、2段目は否定）。
-2. 1段目は文頭に「肯：」、2段目は文頭に「否：」を表示すること。
-3. 各回答ヒントの単語数は最大15単語まで。日本人が発音しづらい単語、相手に通じにくい/誤解されやすい単語は避けること。
-4. 単語の変更可能箇所（名詞、形容詞、動詞など）を示す場合は、カッコ () や [] でくくらず、文字の直前に「名：」「動：」「形：」「動不：」などの表示だけをつけること。
-5. フォーマット順序は必ず【提案の英語文章】➔【そのすぐ下にフリガナのルビ】➔【和訳は英文の後に続く形】にすること。
+1. 回答ヒントの提案は2つまでとし、最も適した自然な言い回しにすること。
+2. その2つのうち、1つは肯定的な回答、もう1つは否定的な回答とすること。
+3. 2つの回答ヒントのうち、1段目は肯定で文頭に「肯：」、もう1つ（2段目）は「否：」を文頭に表示すること。
+4. 各回答ヒントの単語数は15単語までとし、日本人が発音しにくい、または相手に通じにくい、誤解されやすい発音になりそうな単語はなるべく避けて回答ヒントを出すこと。
+5. 単語の変更可能箇所を示す際はカッコでくくらず、「動不：」「名：」「形：」「動：」などの表示だけをつけること。
+6. フリガナのルビは提案の英語文章の下に表示し、和訳は英文の後に続く形で表示すること。
 
 【出力フォーマット例】
 肯：I 形:happy to 動可:help you. (喜んでお手伝いします)
@@ -571,4 +572,206 @@
           preRingBuffer = [];
         }
 
-        activePcm
+        activePcmChunks.push(normalized);
+        activeTotalBytes += normalized.length;
+
+        if (currentMode === 1) {
+          const accumulatedKB = (activeTotalBytes / 1024).toFixed(1);
+          setStatus(`音声検出中... (${accumulatedKB} KB)`);
+
+          if (!chunkTimer) {
+            chunkTimer = setTimeout(() => {
+              chunkTimer = null;
+              processQueue(false, false);
+            }, 300);
+          }
+        }
+      } else {
+        if (activePcmChunks.length === 0) {
+          preRingBuffer.push(normalized);
+          if (preRingBuffer.length > MAX_PRE_BUFFER) {
+            preRingBuffer.shift();
+          }
+        } else if (currentMode === 1 && !silenceTimer) {
+          const silenceDuration = parseInt(document.getElementById('silenceDuration').value, 10) || 1200;
+          silenceTimer = setTimeout(() => {
+            silenceTimer = null;
+            setStatus("無音検知 ➜ 確定処理・翻訳開始");
+            processQueue(true, true);
+          }, silenceDuration);
+        }
+      }
+    }
+
+    async function updateDisplays() {
+      let enText = getCurrentEnText();
+      let jaText = getCurrentJaText();
+
+      document.getElementById('preview-en').innerText = enText;
+      document.getElementById('preview-ja').innerText = jaText;
+
+      if (enText.length > 300) enText = enText.slice(-300);
+      if (jaText.length > 400) jaText = jaText.slice(-400);
+
+      if (bridge) {
+        try {
+          await bridge.textContainerUpgrade(new TextContainerUpgrade({
+            containerID: 1,
+            containerName: 'english_box',
+            content: enText,
+          }));
+          await bridge.textContainerUpgrade(new TextContainerUpgrade({
+            containerID: 2,
+            containerName: 'japanese_box',
+            content: jaText,
+          }));
+        } catch (e) {
+          logError("SDK", "描画アップグレード失敗", e.message);
+        }
+      }
+    }
+
+    window.navigateHistory = async function(direction) {
+      if (historyList.length === 0) return;
+      if (direction === 'up' && historyIndex > 0) {
+        historyIndex--;
+        await updateDisplays();
+      } else if (direction === 'down' && historyIndex < historyList.length - 1) {
+        historyIndex++;
+        await updateDisplays();
+      }
+    };
+
+    window.clearHistory = async function() {
+      historyList = [];
+      historyIndex = -1;
+      currentEnSession = [];
+      activePcmChunks = [];
+      activeTotalBytes = 0;
+      preRingBuffer = [];
+      await updateDisplays();
+      setStatus('履歴クリア');
+    };
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        window.navigateHistory('up');
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        window.navigateHistory('down');
+      }
+    });
+
+    async function initG2() {
+      initKeyStorage();
+
+      try {
+        setStatus(`接続中... [${APP_VERSION}]`);
+        bridge = await waitForEvenAppBridge();
+        
+        const englishBox = new TextContainerProperty({
+          xPosition: 0,
+          yPosition: 0,
+          width: 576,
+          height: 130,
+          borderWidth: 0,
+          borderColor: 5,
+          paddingLength: 2,
+          containerID: 1,
+          containerName: 'english_box',
+          content: getCurrentEnText(),
+          isEventCapture: 0,
+        });
+
+        const japaneseBox = new TextContainerProperty({
+          xPosition: 0,
+          yPosition: 140,
+          width: 576,
+          height: 145,
+          borderWidth: 0,
+          borderColor: 5,
+          paddingLength: 2,
+          containerID: 2,
+          containerName: 'japanese_box',
+          content: getCurrentJaText(),
+          isEventCapture: 1,
+        });
+
+        await bridge.createStartUpPageContainer(
+          new CreateStartUpPageContainer({
+            containerTotalNum: 2,
+            textObject: [englishBox, japaneseBox],
+          })
+        );
+
+        await bridge.audioControl(true);
+        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON`);
+
+        bridge.onEvenHubEvent(async event => {
+          const rawPcm = event.audioEvent?.audioPcm;
+          if (rawPcm) {
+            const normalized = normalizePcm(rawPcm);
+            if (normalized && normalized.length > 0) {
+              handleAudioData(normalized);
+            }
+          }
+
+          const sysType = event.sysEvent?.eventType;
+          const textType = event.textEvent?.eventType;
+
+          if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
+            forceSendPTT();
+          }
+
+          const evt = sysType || textType;
+          if (evt === OsEventTypeList.UP_EVENT || evt === OsEventTypeList.SCROLL_UP_EVENT || evt === OsEventTypeList.FLICK_UP_EVENT) {
+            window.navigateHistory('up');
+          }
+          if (evt === OsEventTypeList.DOWN_EVENT || evt === OsEventTypeList.SCROLL_DOWN_EVENT || evt === OsEventTypeList.FLICK_DOWN_EVENT) {
+            window.navigateHistory('down');
+          }
+        });
+
+      } catch (e) {
+        logError("SDK", "初期化失敗", e.message);
+        setStatus("接続エラー: " + e.message);
+      }
+    }
+
+    function setStatus(msg) {
+      document.getElementById('status').innerText = msg;
+    }
+
+    function updateUIOnly(mode) {
+      document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+      const activeTab = document.getElementById('tab' + mode);
+      if (activeTab) activeTab.classList.add('active');
+    }
+
+    window.switchMode = function(mode) {
+      currentMode = mode;
+      activePcmChunks = [];
+      activeTotalBytes = 0;
+      preRingBuffer = [];
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = null;
+      isProcessing = false;
+      updateUIOnly(currentMode);
+      updateDisplays();
+    };
+
+    window.forceSendPTT = function() {
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = null;
+      isProcessing = false;
+
+      if (historyIndex >= 0 && historyList[historyIndex]) {
+        triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
+      }
+    };
+
+    initG2();
+  </script>
+</body>
+</html>
