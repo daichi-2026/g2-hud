@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.14-FIX)</title>
+  <title>EVEN G2 Translator App (v5.15-STREAM)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.14-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.15-STREAM</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -210,7 +210,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.14-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.15-STREAM] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -222,7 +222,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.14-FIX";
+    const APP_VERSION = "v5.15-STREAM";
 
     let bridge = null;
     let currentMode = 1;
@@ -236,11 +236,9 @@
     let isProcessing = false;
     let silenceTimer = null;
     let chunkTimer = null;
-    let isSpeaking = false; // 音声検出状態フラグを追加
+    let isSpeaking = false;
 
-    let currentEnSession = [];
-    let sessionLastTime = 0;
-
+    // 履歴管理：Array<{ en: string, chunks: Array<{en, ja, hint, isFinal}> }>
     let historyList = [];
     let historyIndex = -1;
 
@@ -287,15 +285,18 @@
     function getCurrentEnText() {
       if (historyList.length === 0) return "(音声入力待機中...)";
       const item = historyList[historyIndex];
-      return `[${historyIndex + 1}/${historyList.length}] ${item.en}`;
+      const en = item.chunks.map(c => c.en).join(' ');
+      return `[${historyIndex + 1}/${historyList.length}] ${en}`;
     }
 
     function getCurrentJaText() {
       if (historyList.length === 0) return "(翻訳・ヒント待機中...)";
       const item = historyList[historyIndex];
-      const ja = item.ja ? `【訳】${item.ja}` : "【訳】（Google翻訳中...）";
-      const hint = item.hint ? `【ヒント】\n${item.hint}` : "【ヒント】（AI作成中...）";
-      return `${ja}\n-------------------\n${hint}`;
+      
+      const jaParts = item.chunks.map(c => c.ja ? c.ja : "（Google翻訳中...）").join(' ');
+      const activeHint = [...item.chunks].reverse().find(c => c.hint)?.hint || "（AI作成中...）";
+
+      return `【訳】${jaParts}\n-------------------\n【ヒント】\n${activeHint}`;
     }
 
     function normalizePcm(pcmData) {
@@ -398,7 +399,7 @@
       return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
     }
 
-    async function fetchGoogleTranslationAsync(targetIndex, text) {
+    async function fetchGoogleTranslationAsync(historyIdx, chunkIdx, text) {
       const googleKey = getInputValue('googleKey');
       if (!googleKey) {
         logError("Google Translate", "Keyが未設定です");
@@ -418,8 +419,8 @@
           const data = await response.json();
           const translatedText = data.data?.translations[0]?.translatedText || "";
 
-          if (translatedText && historyList[targetIndex]) {
-            historyList[targetIndex].ja = translatedText;
+          if (translatedText && historyList[historyIdx]?.chunks[chunkIdx]) {
+            historyList[historyIdx].chunks[chunkIdx].ja = translatedText;
             logError("Google Translate", "取得成功", translatedText);
             await updateDisplays();
           }
@@ -432,9 +433,9 @@
       }
     }
 
-    async function fetchOpenAiHintAsync(targetIndex, fullText) {
+    async function fetchOpenAiHintAsync(historyIdx, chunkIdx, fullText) {
       const openAiKey = getInputValue('apiKey');
-      if (!openAiKey || !historyList[targetIndex]) {
+      if (!openAiKey || !historyList[historyIdx]?.chunks[chunkIdx]) {
         if (!openAiKey) logError("OpenAI", "Keyが未設定です");
         return;
       }
@@ -442,6 +443,7 @@
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー思考プロファイル】\n${userProfileKeywords}\n` : '';
 
+      // ★復元：元の完全なプロンプト設定★
       const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。相手の発言文脈を自動判別し、スマートグラス表示用の英語返答ヒントを生成してください。
 
 【出力構造ルール（絶対順守）】
@@ -502,8 +504,8 @@ Pretty 形:good, thanks!
           const data = await res.json();
           const newHint = data.choices[0]?.message?.content?.trim() || "";
 
-          if (newHint && historyList[targetIndex]) {
-            historyList[targetIndex].hint = newHint;
+          if (newHint && historyList[historyIdx]?.chunks[chunkIdx]) {
+            historyList[historyIdx].chunks[chunkIdx].hint = newHint;
             logError("OpenAI", "取得成功", newHint);
             await updateDisplays();
             setStatus('ヒント生成完了');
@@ -517,10 +519,49 @@ Pretty 形:good, thanks!
       }
     }
 
-    function triggerParallelProcessing(targetIndex, text) {
-      setStatus(`和訳・ヒント処理実行中...`);
-      fetchGoogleTranslationAsync(targetIndex, text);
-      fetchOpenAiHintAsync(targetIndex, text);
+    // 句読点によるリアルタイム・ストリーミング解析
+    function parseAndProcessChunks(rawText, isFinal = false) {
+      if (!rawText) return;
+
+      if (historyList.length === 0) {
+        historyList.push({ chunks: [] });
+        historyIndex = 0;
+      }
+
+      const currentItem = historyList[historyList.length - 1];
+      const regex = /([^,.?!]+[,.?!]*)/g;
+      const matches = rawText.match(regex) || [rawText];
+
+      matches.forEach((segment, idx) => {
+        const cleanSeg = segment.trim();
+        if (!cleanSeg) return;
+
+        const hasPunctuation = /[,.?!]$/.test(cleanSeg);
+        const isLast = (idx === matches.length - 1);
+
+        let targetChunk = currentItem.chunks.find(c => !c.isFinal);
+
+        if (!targetChunk) {
+          targetChunk = { en: cleanSeg, ja: "", hint: "", isFinal: false };
+          currentItem.chunks.push(targetChunk);
+        } else {
+          targetChunk.en = cleanSeg;
+        }
+
+        if (hasPunctuation || (isFinal && isLast)) {
+          targetChunk.isFinal = true;
+          const chunkIdx = currentItem.chunks.indexOf(targetChunk);
+          const historyIdx = historyList.length - 1;
+
+          logError("Chunk確定", `[${historyIdx}][${chunkIdx}] ${cleanSeg}`);
+          fetchGoogleTranslationAsync(historyIdx, chunkIdx, cleanSeg);
+
+          const fullContext = currentItem.chunks.map(c => c.en).join(' ');
+          fetchOpenAiHintAsync(historyIdx, chunkIdx, fullContext);
+        }
+      });
+
+      updateDisplays();
     }
 
     async function processQueue(isFinal = false, clearBuffer = false) {
@@ -535,46 +576,19 @@ Pretty 形:good, thanks!
         activeTotalBytes = 0;
       }
 
-      let targetIndex = -1;
-
       try {
         if (chunksToProcess.length > 0 && bytesToProcess >= 800) {
           const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
           let enText = await transcribeWithDeepgram(wavBlob);
 
           if (!isNoiseOrFiller(enText)) {
-            const now = Date.now();
-            const isNewSession = (now - sessionLastTime > 6000 || currentEnSession.length === 0);
-
-            if (isNewSession) {
-              currentEnSession = [enText];
-            } else {
-              currentEnSession[currentEnSession.length - 1] = enText;
-            }
-            sessionLastTime = now;
-
-            const fullEn = currentEnSession.join(' ');
-
-            if (isNewSession || historyList.length === 0) {
-              historyList.push({ en: fullEn, ja: null, hint: null });
-            } else {
-              historyList[historyList.length - 1].en = fullEn;
-            }
-            
-            historyIndex = historyList.length - 1;
-            targetIndex = historyIndex;
-
-            await updateDisplays();
+            parseAndProcessChunks(enText, isFinal);
           }
         }
       } catch (e) {
         logError("ProcessQueue", "音声文字起こし失敗", e.message);
       } finally {
         isProcessing = false;
-        // 無音確定時（isFinal = true）に確実にAIリクエストを実行
-        if (isFinal && targetIndex >= 0 && historyIndex >= 0 && historyList[historyIndex]) {
-          triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
-        }
       }
     }
 
@@ -583,7 +597,6 @@ Pretty 形:good, thanks!
       const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 80;
 
       if (rms >= threshold) {
-        // 声を検知している間は無音タイマーを解除し、発話状態フラグを立てる
         isSpeaking = true;
         if (silenceTimer) {
           clearTimeout(silenceTimer);
@@ -613,21 +626,25 @@ Pretty 形:good, thanks!
           }
         }
       } else {
-        // 無音時の処理
         if (activePcmChunks.length === 0) {
           preRingBuffer.push(normalized);
           if (preRingBuffer.length > MAX_PRE_BUFFER) {
             preRingBuffer.shift();
           }
         } else if (currentMode === 1) {
-          // 直前まで発話していた場合、無音タイマーが未起動であれば確実にタイマーをスタートさせる
           if (isSpeaking && !silenceTimer) {
             const silenceDuration = parseInt(document.getElementById('silenceDuration').value, 10) || 1200;
             silenceTimer = setTimeout(() => {
               silenceTimer = null;
-              isSpeaking = false; // 無音確定
-              setStatus("無音検知 ➜ 確定処理・翻訳開始");
+              isSpeaking = false;
+              setStatus("無音確定 ➜ 最終文節確定");
               processQueue(true, true);
+
+              // 無音確定で次の会話セッション用に新しい会話履歴枠を用意
+              if (historyList.length > 0 && historyList[historyList.length - 1].chunks.length > 0) {
+                historyList.push({ chunks: [] });
+                historyIndex = historyList.length - 1;
+              }
             }, silenceDuration);
           }
         }
@@ -668,6 +685,7 @@ Pretty 形:good, thanks!
       }
     }
 
+    // ★復元：履歴ナビゲーション関数★
     window.navigateHistory = async function(direction) {
       if (historyList.length === 0) return;
       if (direction === 'up' && historyIndex > 0) {
@@ -682,7 +700,6 @@ Pretty 形:good, thanks!
     window.clearHistory = async function() {
       historyList = [];
       historyIndex = -1;
-      currentEnSession = [];
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
@@ -693,6 +710,7 @@ Pretty 形:good, thanks!
       setStatus('履歴クリア');
     };
 
+    // ★復元：キーボードの上下キーイベントリスナー★
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -748,6 +766,7 @@ Pretty 形:good, thanks!
         await bridge.audioControl(true);
         setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON`);
 
+        // ★復元：スマートグラスからのタッチ・フリック操作イベントハンドラ★
         bridge.onEvenHubEvent(async event => {
           const rawPcm = event.audioEvent?.audioPcm;
           if (rawPcm) {
@@ -807,10 +826,7 @@ Pretty 形:good, thanks!
       silenceTimer = null;
       isSpeaking = false;
       isProcessing = false;
-
-      if (historyIndex >= 0 && historyList[historyIndex]) {
-        triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
-      }
+      processQueue(true, true);
     };
 
     initG2();
