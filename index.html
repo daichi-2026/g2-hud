@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.11-FIX)</title>
+  <title>EVEN G2 Translator App (v5.10-REQ)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.11-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.10-REQ</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -210,7 +210,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.11-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.10-REQ] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -222,7 +222,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.11-FIX";
+    const APP_VERSION = "v5.10-REQ";
 
     let bridge = null;
     let currentMode = 1;
@@ -236,6 +236,9 @@
     let isProcessing = false;
     let silenceTimer = null;
     let chunkTimer = null;
+
+    let currentEnSession = [];
+    let sessionLastTime = 0;
 
     let historyList = [];
     let historyIndex = -1;
@@ -509,6 +512,7 @@
       }
 
       let targetIndex = -1;
+      let targetText = "";
 
       try {
         if (chunksToProcess.length > 0 && bytesToProcess >= 800) {
@@ -516,10 +520,27 @@
           let enText = await transcribeWithDeepgram(wavBlob);
 
           if (!isNoiseOrFiller(enText)) {
-            // 一度確定した発言は上書きせず、新しく末尾に追加（継ぎ足し）
-            historyList.push({ en: enText, ja: null, hint: null });
+            const now = Date.now();
+            const isNewSession = (now - sessionLastTime > 6000 || currentEnSession.length === 0);
+
+            if (isNewSession) {
+              currentEnSession = [enText];
+            } else {
+              currentEnSession[currentEnSession.length - 1] = enText;
+            }
+            sessionLastTime = now;
+
+            const fullEn = currentEnSession.join(' ');
+
+            if (isNewSession || historyList.length === 0) {
+              historyList.push({ en: fullEn, ja: null, hint: null });
+            } else {
+              historyList[historyList.length - 1].en = fullEn;
+            }
+            
             historyIndex = historyList.length - 1;
             targetIndex = historyIndex;
+            targetText = fullEn;
 
             await updateDisplays();
           }
@@ -528,9 +549,8 @@
         logError("ProcessQueue", "音声文字起こし失敗", e.message);
       } finally {
         isProcessing = false;
-        // 最終確定（無音検知またはPTT送信時）のみAPIをコールして上書きループを防止
-        if (isFinal && targetIndex >= 0 && historyList[targetIndex]) {
-          triggerParallelProcessing(targetIndex, historyList[targetIndex].en);
+        if ((isFinal || targetIndex >= 0) && historyIndex >= 0 && historyList[historyIndex]) {
+          triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
         }
       }
     }
@@ -559,6 +579,13 @@
         if (currentMode === 1) {
           const accumulatedKB = (activeTotalBytes / 1024).toFixed(1);
           setStatus(`音声検出中... (${accumulatedKB} KB)`);
+
+          if (!chunkTimer) {
+            chunkTimer = setTimeout(() => {
+              chunkTimer = null;
+              processQueue(false, false);
+            }, 300);
+          }
         }
       } else {
         if (activePcmChunks.length === 0) {
@@ -619,6 +646,7 @@
     window.clearHistory = async function() {
       historyList = [];
       historyIndex = -1;
+      currentEnSession = [];
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
@@ -739,7 +767,9 @@
       silenceTimer = null;
       isProcessing = false;
 
-      processQueue(true, true);
+      if (historyIndex >= 0 && historyList[historyIndex]) {
+        triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
+      }
     };
 
     initG2();
