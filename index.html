@@ -243,6 +243,10 @@
     let historyList = [];
     let historyIndex = -1;
 
+    // 画面ちらつき抑止用の描画キャッシュ変数
+    let lastEnContent = "";
+    let lastJaContent = "";
+
     function initKeyStorage() {
       const gEl = document.getElementById('googleKey');
       const dEl = document.getElementById('deepgramKey');
@@ -567,7 +571,8 @@ Pretty 形:good, thanks!
         logError("ProcessQueue", "音声文字起こし失敗", e.message);
       } finally {
         isProcessing = false;
-        if ((isFinal || targetIndex >= 0) && historyIndex >= 0 && historyList[historyIndex]) {
+        // 中間状態（isFinal = false）ではAI連携を行わず、無音確定（isFinal = true）または手動送信時のみ実行するガード条件
+        if (isFinal && targetIndex >= 0 && historyIndex >= 0 && historyList[historyIndex]) {
           triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
         }
       }
@@ -632,18 +637,25 @@ Pretty 形:good, thanks!
       if (enText.length > 300) enText = enText.slice(-300);
       if (jaText.length > 400) jaText = jaText.slice(-400);
 
+      // 表示内容に変化があった時のみ SDK の描画を呼び出す（画面チラつき防止ガード）
       if (bridge) {
         try {
-          await bridge.textContainerUpgrade(new TextContainerUpgrade({
-            containerID: 1,
-            containerName: 'english_box',
-            content: enText,
-          }));
-          await bridge.textContainerUpgrade(new TextContainerUpgrade({
-            containerID: 2,
-            containerName: 'japanese_box',
-            content: jaText,
-          }));
+          if (enText !== lastEnContent) {
+            lastEnContent = enText;
+            await bridge.textContainerUpgrade(new TextContainerUpgrade({
+              containerID: 1,
+              containerName: 'english_box',
+              content: enText,
+            }));
+          }
+          if (jaText !== lastJaContent) {
+            lastJaContent = jaText;
+            await bridge.textContainerUpgrade(new TextContainerUpgrade({
+              containerID: 2,
+              containerName: 'japanese_box',
+              content: jaText,
+            }));
+          }
         } catch (e) {
           logError("SDK", "描画アップグレード失敗", e.message);
         }
