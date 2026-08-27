@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.13-REQ)</title>
+  <title>EVEN G2 Translator App (v5.14-FIX)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.13-REQ</span>
+      <span class="version-badge" id="versionBadge">v5.14-FIX</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -210,7 +210,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.13-REQ] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.14-FIX] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -222,7 +222,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.13-REQ";
+    const APP_VERSION = "v5.14-FIX";
 
     let bridge = null;
     let currentMode = 1;
@@ -236,6 +236,7 @@
     let isProcessing = false;
     let silenceTimer = null;
     let chunkTimer = null;
+    let isSpeaking = false; // 音声検出状態フラグを追加
 
     let currentEnSession = [];
     let sessionLastTime = 0;
@@ -243,7 +244,6 @@
     let historyList = [];
     let historyIndex = -1;
 
-    // 画面ちらつき抑止用の描画キャッシュ変数
     let lastEnContent = "";
     let lastJaContent = "";
 
@@ -571,7 +571,7 @@ Pretty 形:good, thanks!
         logError("ProcessQueue", "音声文字起こし失敗", e.message);
       } finally {
         isProcessing = false;
-        // 中間状態（isFinal = false）ではAI連携を行わず、無音確定（isFinal = true）または手動送信時のみ実行するガード条件
+        // 無音確定時（isFinal = true）に確実にAIリクエストを実行
         if (isFinal && targetIndex >= 0 && historyIndex >= 0 && historyList[historyIndex]) {
           triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
         }
@@ -583,6 +583,8 @@ Pretty 形:good, thanks!
       const threshold = parseFloat(document.getElementById('noiseThreshold').value) || 80;
 
       if (rms >= threshold) {
+        // 声を検知している間は無音タイマーを解除し、発話状態フラグを立てる
+        isSpeaking = true;
         if (silenceTimer) {
           clearTimeout(silenceTimer);
           silenceTimer = null;
@@ -611,18 +613,23 @@ Pretty 形:good, thanks!
           }
         }
       } else {
+        // 無音時の処理
         if (activePcmChunks.length === 0) {
           preRingBuffer.push(normalized);
           if (preRingBuffer.length > MAX_PRE_BUFFER) {
             preRingBuffer.shift();
           }
-        } else if (currentMode === 1 && !silenceTimer) {
-          const silenceDuration = parseInt(document.getElementById('silenceDuration').value, 10) || 1200;
-          silenceTimer = setTimeout(() => {
-            silenceTimer = null;
-            setStatus("無音検知 ➜ 確定処理・翻訳開始");
-            processQueue(true, true);
-          }, silenceDuration);
+        } else if (currentMode === 1) {
+          // 直前まで発話していた場合、無音タイマーが未起動であれば確実にタイマーをスタートさせる
+          if (isSpeaking && !silenceTimer) {
+            const silenceDuration = parseInt(document.getElementById('silenceDuration').value, 10) || 1200;
+            silenceTimer = setTimeout(() => {
+              silenceTimer = null;
+              isSpeaking = false; // 無音確定
+              setStatus("無音検知 ➜ 確定処理・翻訳開始");
+              processQueue(true, true);
+            }, silenceDuration);
+          }
         }
       }
     }
@@ -637,7 +644,6 @@ Pretty 形:good, thanks!
       if (enText.length > 300) enText = enText.slice(-300);
       if (jaText.length > 400) jaText = jaText.slice(-400);
 
-      // 表示内容に変化があった時のみ SDK の描画を呼び出す（画面チラつき防止ガード）
       if (bridge) {
         try {
           if (enText !== lastEnContent) {
@@ -680,6 +686,9 @@ Pretty 形:good, thanks!
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
+      isSpeaking = false;
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = null;
       await updateDisplays();
       setStatus('履歴クリア');
     };
@@ -785,6 +794,7 @@ Pretty 形:good, thanks!
       activePcmChunks = [];
       activeTotalBytes = 0;
       preRingBuffer = [];
+      isSpeaking = false;
       if (silenceTimer) clearTimeout(silenceTimer);
       silenceTimer = null;
       isProcessing = false;
@@ -795,6 +805,7 @@ Pretty 形:good, thanks!
     window.forceSendPTT = function() {
       if (silenceTimer) clearTimeout(silenceTimer);
       silenceTimer = null;
+      isSpeaking = false;
       isProcessing = false;
 
       if (historyIndex >= 0 && historyList[historyIndex]) {
