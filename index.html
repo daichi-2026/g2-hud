@@ -428,7 +428,6 @@
       }
     }
 
-    /* ▼▼▼ OpenAI プロンプト修正（文脈に合った相槌・短文応答＋品詞タグの最適化） ▼▼▼ */
     async function fetchOpenAiHintAsync(targetIndex, fullText) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[targetIndex]) {
@@ -439,28 +438,20 @@
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー設定】\n${userProfileKeywords}\n` : '';
 
-      const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。相手の発言に対し、実際の英会話で最も自然な返答ヒントを2つ作成してください。
+      const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。相手の発言に対し、最も適した自然な回答ヒントを生成してください。
 
-【重要方針】
-・時候の挨拶や「暑いですね」のような雑談・挨拶に対しては、無理に長文を作らず、「本当ですね」「元気にしています」等の自然な相槌・共感・短文回答を最優先してください。
-・文脈に合わない硬すぎる定型文は避け、会話がスムーズに弾む表現にしてください。
+【厳格な指示ルール】
+1. 回答ヒントの提案は2つだけ（1段目は肯定、2段目は否定）。
+2. 1段目は文頭に「肯：」、2段目は文頭に「否：」を表示すること。
+3. 各回答ヒントの単語数は最大15単語まで。日本人が発音しづらい単語、相手に通じにくい/誤解されやすい単語は避けること。
+4. 単語の変更可能箇所（名詞、形容詞、動詞など）を示す場合は、カッコ () や [] でくくらず、文字の直前に「名：」「動：」「形：」「動不：」などの表示だけをつけること。
+5. フォーマット順序は必ず【提案の英語文章】➔【そのすぐ下にフリガナのルビ】➔【和訳は英文の後に続く形】にすること。
 
-【出力ルール】
-1. 提案は必ず2つ出力してください。
-   ・1つ目（1段目）: 肯定・同意・前向きな相槌（文頭に「肯：」を付ける）
-   ・2つ目（2段目）: 否定・異議・控えめな回答（文頭に「否：」を付ける）
-2. 各提案は最大15単語までの簡潔な英語（短文や相槌も可）にしてください。
-3. 日本人が発音しづらい単語、通じにくい英単語は避け、口に出しやすい語彙を選定してください。
-4. 単語の置き換え可能箇所のみ品詞タグを付与してください（カッコは使わずタグのみ）。
-   ※助動詞や基本動詞の進行形（doing, beingなど）にはタグをつけず、名詞[名:]・意味を持つ実質動詞[動可:]・形容詞[形:]・副詞[副:]の置き換え箇所のみに限定してください。
-   例: [形:busy], [名:weather], [動可:agree]
-5. フォーマット順序は必ず【英語文章】➔【下段にカタカナ読み】➔【その後に和訳】にしてください。
-
-【出力例】
-肯：Yeah, [形:hot] indeed. I am doing well!
-[イエー ハット インディード アイ アム ドゥーイング ウェル] (本当ですね、暑いです。元気ですよ！)
-否：Not really, I am feeling a bit [形:tired].
-[ノット リアリー アイ アム フィーリング ア ビット タイアード] (うーん、少し疲れています)";
+【出力フォーマット例】
+肯：I 形:happy to 動可:help you. (喜んでお手伝いします)
+[アイ ハッピー トゥー ヘルプ ユー]
+否：I 形:busy 形:right 形:now. (今はあいにく手が離せません)
+[アイ ビジー ライト ナウ]`;
 
       try {
         logError("OpenAI", "送信中...", fullText);
@@ -499,7 +490,6 @@
         logError("OpenAI", "通信エラー", e.message);
       }
     }
-    /* ▲▲▲ プロンプト修正終了 ▲▲▲ */
 
     function triggerParallelProcessing(targetIndex, text) {
       setStatus(`和訳・ヒント処理実行中...`);
@@ -581,206 +571,4 @@
           preRingBuffer = [];
         }
 
-        activePcmChunks.push(normalized);
-        activeTotalBytes += normalized.length;
-
-        if (currentMode === 1) {
-          const accumulatedKB = (activeTotalBytes / 1024).toFixed(1);
-          setStatus(`音声検出中... (${accumulatedKB} KB)`);
-
-          if (!chunkTimer) {
-            chunkTimer = setTimeout(() => {
-              chunkTimer = null;
-              processQueue(false, false);
-            }, 300);
-          }
-        }
-      } else {
-        if (activePcmChunks.length === 0) {
-          preRingBuffer.push(normalized);
-          if (preRingBuffer.length > MAX_PRE_BUFFER) {
-            preRingBuffer.shift();
-          }
-        } else if (currentMode === 1 && !silenceTimer) {
-          const silenceDuration = parseInt(document.getElementById('silenceDuration').value, 10) || 1200;
-          silenceTimer = setTimeout(() => {
-            silenceTimer = null;
-            setStatus("無音検知 ➜ 確定処理・翻訳開始");
-            processQueue(true, true);
-          }, silenceDuration);
-        }
-      }
-    }
-
-    async function updateDisplays() {
-      let enText = getCurrentEnText();
-      let jaText = getCurrentJaText();
-
-      document.getElementById('preview-en').innerText = enText;
-      document.getElementById('preview-ja').innerText = jaText;
-
-      if (enText.length > 300) enText = enText.slice(-300);
-      if (jaText.length > 400) jaText = jaText.slice(-400);
-
-      if (bridge) {
-        try {
-          await bridge.textContainerUpgrade(new TextContainerUpgrade({
-            containerID: 1,
-            containerName: 'english_box',
-            content: enText,
-          }));
-          await bridge.textContainerUpgrade(new TextContainerUpgrade({
-            containerID: 2,
-            containerName: 'japanese_box',
-            content: jaText,
-          }));
-        } catch (e) {
-          logError("SDK", "描画アップグレード失敗", e.message);
-        }
-      }
-    }
-
-    window.navigateHistory = async function(direction) {
-      if (historyList.length === 0) return;
-      if (direction === 'up' && historyIndex > 0) {
-        historyIndex--;
-        await updateDisplays();
-      } else if (direction === 'down' && historyIndex < historyList.length - 1) {
-        historyIndex++;
-        await updateDisplays();
-      }
-    };
-
-    window.clearHistory = async function() {
-      historyList = [];
-      historyIndex = -1;
-      currentEnSession = [];
-      activePcmChunks = [];
-      activeTotalBytes = 0;
-      preRingBuffer = [];
-      await updateDisplays();
-      setStatus('履歴クリア');
-    };
-
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        window.navigateHistory('up');
-      } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        window.navigateHistory('down');
-      }
-    });
-
-    async function initG2() {
-      initKeyStorage();
-
-      try {
-        setStatus(`接続中... [${APP_VERSION}]`);
-        bridge = await waitForEvenAppBridge();
-        
-        const englishBox = new TextContainerProperty({
-          xPosition: 0,
-          yPosition: 0,
-          width: 576,
-          height: 130,
-          borderWidth: 0,
-          borderColor: 5,
-          paddingLength: 2,
-          containerID: 1,
-          containerName: 'english_box',
-          content: getCurrentEnText(),
-          isEventCapture: 0,
-        });
-
-        const japaneseBox = new TextContainerProperty({
-          xPosition: 0,
-          yPosition: 140,
-          width: 576,
-          height: 145,
-          borderWidth: 0,
-          borderColor: 5,
-          paddingLength: 2,
-          containerID: 2,
-          containerName: 'japanese_box',
-          content: getCurrentJaText(),
-          isEventCapture: 1,
-        });
-
-        await bridge.createStartUpPageContainer(
-          new CreateStartUpPageContainer({
-            containerTotalNum: 2,
-            textObject: [englishBox, japaneseBox],
-          })
-        );
-
-        await bridge.audioControl(true);
-        setStatus(`G2 SDK 接続完了 (${APP_VERSION}) / マイクON`);
-
-        bridge.onEvenHubEvent(async event => {
-          const rawPcm = event.audioEvent?.audioPcm;
-          if (rawPcm) {
-            const normalized = normalizePcm(rawPcm);
-            if (normalized && normalized.length > 0) {
-              handleAudioData(normalized);
-            }
-          }
-
-          const sysType = event.sysEvent?.eventType;
-          const textType = event.textEvent?.eventType;
-
-          if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
-            forceSendPTT();
-          }
-
-          const evt = sysType || textType;
-          if (evt === OsEventTypeList.UP_EVENT || evt === OsEventTypeList.SCROLL_UP_EVENT || evt === OsEventTypeList.FLICK_UP_EVENT) {
-            window.navigateHistory('up');
-          }
-          if (evt === OsEventTypeList.DOWN_EVENT || evt === OsEventTypeList.SCROLL_DOWN_EVENT || evt === OsEventTypeList.FLICK_DOWN_EVENT) {
-            window.navigateHistory('down');
-          }
-        });
-
-      } catch (e) {
-        logError("SDK", "初期化失敗", e.message);
-        setStatus("接続エラー: " + e.message);
-      }
-    }
-
-    function setStatus(msg) {
-      document.getElementById('status').innerText = msg;
-    }
-
-    function updateUIOnly(mode) {
-      document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
-      const activeTab = document.getElementById('tab' + mode);
-      if (activeTab) activeTab.classList.add('active');
-    }
-
-    window.switchMode = function(mode) {
-      currentMode = mode;
-      activePcmChunks = [];
-      activeTotalBytes = 0;
-      preRingBuffer = [];
-      if (silenceTimer) clearTimeout(silenceTimer);
-      silenceTimer = null;
-      isProcessing = false;
-      updateUIOnly(currentMode);
-      updateDisplays();
-    };
-
-    window.forceSendPTT = function() {
-      if (silenceTimer) clearTimeout(silenceTimer);
-      silenceTimer = null;
-      isProcessing = false;
-
-      if (historyIndex >= 0 && historyList[historyIndex]) {
-        triggerParallelProcessing(historyIndex, historyList[historyIndex].en);
-      }
-    };
-
-    initG2();
-  </script>
-</body>
-</html>
+        activePcm
