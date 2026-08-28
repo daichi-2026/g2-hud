@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.29-FIX)</title>
+  <title>EVEN G2 Translator App (v5.30-FIX)</title>
   <style>
     body {
       background-color: #111;
@@ -139,8 +139,8 @@
 
   <div class="glass-container">
     <div class="mode-tab-bar">
-      <div id="tab1" class="mode-tab active" onclick="switchMode(1)">1: 連続即時描画</div>
-      <div id="tab2" class="mode-tab" onclick="switchMode(2)">2: PTT (押して送信)</div>
+      <div id="tab1" class="mode-tab active" onclick="window.switchMode(1)">1: 連続即時描画</div>
+      <div id="tab2" class="mode-tab" onclick="window.switchMode(2)">2: PTT (押して送信)</div>
     </div>
 
     <div id="glass-display">
@@ -148,8 +148,8 @@
         <div style="display:flex; justify-content:space-between; align-items:center; font-size:10px;">
           <span style="color:#00FF00; font-weight:bold;">[上段] 英語リアルタイム枠 (↑/↓ 履歴)</span>
           <div>
-            <button class="nav-btn" onclick="navigateHistory('up')">▲前</button>
-            <button class="nav-btn" onclick="navigateHistory('down')">▼次</button>
+            <button class="nav-btn" onclick="window.navigateHistory('up')">▲前</button>
+            <button class="nav-btn" onclick="window.navigateHistory('down')">▼次</button>
           </div>
         </div>
         <div class="preview-box" style="height: 115px;">
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.29-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.30-FIX</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -195,16 +195,16 @@
     <div style="display:flex; gap:10px;">
       <div style="flex:1;">
         <label>途中送信間隔: <span id="chunkVal">1500</span>ms</label>
-        <input type="range" id="chunkDuration" min="500" max="3000" step="100" value="1500" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+        <input type="range" id="chunkDuration" min="500" max="3000" step="100" value="1500" style="width:100%;" oninput="document.getElementById('chunkVal').innerText = this.value" />
       </div>
       <div style="flex:1;">
         <label>無音確定時間: <span id="silenceVal">1200</span>ms</label>
-        <input type="range" id="silenceDuration" min="500" max="3000" step="100" value="1200" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
+        <input type="range" id="silenceDuration" min="500" max="3000" step="100" value="1200" style="width:100%;" oninput="document.getElementById('silenceVal').innerText = this.value" />
       </div>
     </div>
 
-    <button onclick="forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信（文章確定）</button>
-    <button onclick="clearHistory()" style="background:#cc3333;">🗑️ 履歴をクリア</button>
+    <button onclick="window.forceSendPTT()" style="background:#0088cc;">🎤 PTT 手動送信（文章確定）</button>
+    <button onclick="window.clearHistory()" style="background:#cc3333;">🗑️ 履歴をクリア</button>
     
     <div style="border-top:1px solid #333; margin:2px 0;"></div>
     
@@ -213,9 +213,9 @@
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
-      <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
+      <button onclick="window.clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.29-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.30-FIX] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -227,7 +227,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.29-FIX";
+    const APP_VERSION = "v5.30-FIX";
 
     let bridge = null;
     let currentMode = 1;
@@ -528,12 +528,17 @@
 
       try {
         if (chunksToProcess.length > 0 && bytesToProcess >= 1600) {
+          setStatus('音声変換中 (Deepgram)...');
           const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
           let enText = await transcribeWithDeepgram(wavBlob);
 
           if (enText) {
             parseAndProcessChunks(enText);
+          } else {
+            setStatus('音声認識テキストなし');
           }
+        } else {
+          setStatus('送信対象の音声データがありません');
         }
       } catch (e) {
         logError("ProcessQueue", "エラー", e.message);
@@ -569,6 +574,9 @@
               processQueue();
             }, chunkDuration);
           }
+        } else {
+          const accumulatedKB = (activeTotalBytes / 1024).toFixed(1);
+          setStatus(`PTT録音中... (${accumulatedKB} KB)`);
         }
       } else {
         if (activePcmChunks.length === 0) {
@@ -587,11 +595,14 @@
       const enElem = document.getElementById('preview-en');
       const jaElem = document.getElementById('preview-ja');
 
-      enElem.innerText = enText;
-      jaElem.innerText = jaText;
-
-      enElem.scrollTop = enElem.scrollHeight;
-      jaElem.scrollTop = jaElem.scrollHeight;
+      if (enElem) {
+        enElem.innerText = enText;
+        enElem.scrollTop = enElem.scrollHeight;
+      }
+      if (jaElem) {
+        jaElem.innerText = jaText;
+        jaElem.scrollTop = jaElem.scrollHeight;
+      }
 
       if (bridge) {
         try {
@@ -637,7 +648,32 @@
       if (chunkTimer) clearTimeout(chunkTimer);
       chunkTimer = null;
       await updateDisplays();
-      setStatus('履歴クリア');
+      setStatus('履歴クリア完了');
+    };
+
+    window.switchMode = function(mode) {
+      currentMode = mode;
+      activePcmChunks = [];
+      activeTotalBytes = 0;
+      preRingBuffer = [];
+      if (chunkTimer) clearTimeout(chunkTimer);
+      chunkTimer = null;
+      isProcessing = false;
+
+      document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+      const activeTab = document.getElementById('tab' + mode);
+      if (activeTab) activeTab.classList.add('active');
+
+      setStatus(`モード切替: ${mode === 1 ? '連続即時描画' : 'PTT手動送信'}`);
+      updateDisplays();
+    };
+
+    window.forceSendPTT = function() {
+      if (chunkTimer) clearTimeout(chunkTimer);
+      chunkTimer = null;
+      isProcessing = false;
+      logError("PTT", "手動送信が実行されました");
+      processQueue();
     };
 
     window.addEventListener('keydown', (e) => {
@@ -708,7 +744,7 @@
           const textType = event.textEvent?.eventType;
 
           if (sysType === OsEventTypeList.CLICK_EVENT || textType === OsEventTypeList.CLICK_EVENT) {
-            forceSendPTT();
+            window.forceSendPTT();
           }
 
           const evt = sysType || textType;
@@ -729,31 +765,6 @@
     function setStatus(msg) {
       document.getElementById('status').innerText = msg;
     }
-
-    function updateUIOnly(mode) {
-      document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
-      const activeTab = document.getElementById('tab' + mode);
-      if (activeTab) activeTab.classList.add('active');
-    }
-
-    window.switchMode = function(mode) {
-      currentMode = mode;
-      activePcmChunks = [];
-      activeTotalBytes = 0;
-      preRingBuffer = [];
-      if (chunkTimer) clearTimeout(chunkTimer);
-      chunkTimer = null;
-      isProcessing = false;
-      updateUIOnly(currentMode);
-      updateDisplays();
-    };
-
-    window.forceSendPTT = function() {
-      if (chunkTimer) clearTimeout(chunkTimer);
-      chunkTimer = null;
-      isProcessing = false;
-      processQueue();
-    };
 
     initG2();
   </script>
