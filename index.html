@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.27-FIX)</title>
+  <title>EVEN G2 Translator App (v5.28-FIX)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.27-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.28-FIX</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -215,7 +215,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.27-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.28-FIX] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -227,7 +227,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.27-FIX";
+    const APP_VERSION = "v5.28-FIX";
 
     let bridge = null;
     let currentMode = 1;
@@ -416,17 +416,17 @@
       }
     }
 
-    async function fetchOpenAiHintAsync(historyIdx, chunkText) {
+    async function fetchOpenAiHintAsync(historyIdx, fullTextContext) {
       const openAiKey = getInputValue('apiKey');
       if (!openAiKey || !historyList[historyIdx]) return;
 
       const userProfileKeywords = getInputValue('userProfile');
       const profileContext = userProfileKeywords ? `【ユーザー思考プロファイル】\n${userProfileKeywords}\n` : '';
 
-      const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。入力された最新の英語発言（短文）に対するスマートグラス表示用の返答ヒントを生成してください。
+      const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。相手の発言（文脈全体）を踏まえ、スマートグラスに表示する最適な返答ヒントを生成してください。
 
 【1. 返答構成ルール】
-必ず「肯：」（肯定・同意）と「否：」（否定・異議・別提案）の2パターンを提示してください。
+文脈に合った「肯：」（肯定・同意・相づち）と「否：」（否定・異議・別提案）の2パターンのみを過不足なく提示してください。
 
 【2. 品詞タグ付けルール（※英語本文のみに適用）】
 英語本文の中で言い換え可能な単語の直前には必ず品詞タグを付与してください。
@@ -466,22 +466,18 @@
             max_tokens: 250,
             messages: [
               { role: 'system', content: systemPrompt },
-              { role: 'user', content: chunkText }
+              { role: 'user', content: fullTextContext }
             ]
           })
         });
 
         if (res.ok) {
           const data = await res.json();
-          const newChunkHint = data.choices[0]?.message?.content?.trim() || "";
+          const newHint = data.choices[0]?.message?.content?.trim() || "";
 
-          if (newChunkHint && historyList[historyIdx]) {
-            // 上書きせず、既存のヒントの末尾に追記（継ぎ足し）
-            if (historyList[historyIdx].sessionHint) {
-              historyList[historyIdx].sessionHint += "\n\n" + newChunkHint;
-            } else {
-              historyList[historyIdx].sessionHint = newChunkHint;
-            }
+          if (newHint && historyList[historyIdx]) {
+            // 全体文脈に応じた最新のスマートなヒントで更新
+            historyList[historyIdx].sessionHint = newHint;
             await updateDisplays();
             setStatus('処理完了・音声待機中');
           }
@@ -511,8 +507,9 @@
       logError("テキスト更新", `[${historyIdx}][${chunkIdx}] ${cleanText}`);
       fetchGoogleTranslationAsync(historyIdx, chunkIdx, cleanText);
 
-      // 過去全文を送らず、今回の新規チャンクテキストだけを送信してヒントを継ぎ足す
-      fetchOpenAiHintAsync(historyIdx, cleanText);
+      // 相手の今までの会話全文（コンテキスト）を渡して最新ヒントを生成
+      const fullContext = currentItem.chunks.map(c => c.en).join(' ');
+      fetchOpenAiHintAsync(historyIdx, fullContext);
 
       updateDisplays();
     }
@@ -585,11 +582,15 @@
       let enText = getCurrentEnText();
       let jaText = getCurrentJaText();
 
-      document.getElementById('preview-en').innerText = enText;
-      document.getElementById('preview-ja').innerText = jaText;
+      const enElem = document.getElementById('preview-en');
+      const jaElem = document.getElementById('preview-ja');
 
-      if (enText.length > 300) enText = enText.slice(-300);
-      if (jaText.length > 400) jaText = jaText.slice(-400);
+      enElem.innerText = enText;
+      jaElem.innerText = jaText;
+
+      // ブラウザ上のプレビュー枠を最新の最下部へ自動スクロール
+      enElem.scrollTop = enElem.scrollHeight;
+      jaElem.scrollTop = jaElem.scrollHeight;
 
       if (bridge) {
         try {
