@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.24-FIX)</title>
+  <title>EVEN G2 Translator App (v5.25-FIX)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.24-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.25-FIX</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -195,7 +195,7 @@
     <div style="display:flex; gap:10px;">
       <div style="flex:1;">
         <label>途中送信間隔: <span id="chunkVal">1500</span>ms</label>
-        <input type="range" id="chunkDuration" min="500" max="3000" step="100" value="1500" style="width:100%;" oninput="document.getElementById('chunkVal').innerText = this.value" />
+        <input type="range" id="chunkDuration" min="500" max="3000" step="100" value="1500" style="width:100%;" oninput="document.getElementById('thresholdVal').innerText = this.value" />
       </div>
       <div style="flex:1;">
         <label>無音確定時間: <span id="silenceVal">1200</span>ms</label>
@@ -215,7 +215,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.24-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.25-FIX] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -227,7 +227,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.24-FIX";
+    const APP_VERSION = "v5.25-FIX";
 
     let bridge = null;
     let currentMode = 1;
@@ -430,24 +430,26 @@
 1. 必ず「肯：」（肯定・同意・前向きな返答）と「否：」（否定・異議・別提案・断り等）の2パターンを提示すること。
 2. 構成要素は「肯: 英語本文 カタカナルビ (日本語訳)」「否: 英語本文 カタカナルビ (日本語訳)」の形式とし、ラベル（肯: / 否:）や英語、ルビを省略してはならない。
 
-【言い換え可能単語の品詞タグ付けルール（カッコは絶対に使わないこと）】
-会話の考え・感情・状況に応じてユーザーが言い換え可能な単語やフレーズの直前に、角カッコや丸カッコを使わず、直接以下の品詞タグ（コロン付き）を付与して表記すること。
-・単体で変更可能な動詞（句動詞以外） → 動可:word
-・句動詞（動詞+前置詞/副詞などの熟語） → 動不:phrasal verb
-・名詞 → 名:noun
-・形容詞 → 形:adjective
-・副詞 → 副:adverb
+【言い換え可能単語の品詞タグ付けルール（カッコ全般は使用禁止）】
+会話の考えや状況に応じて言い換え可能な単語・熟語の直前には、必ず対応する品詞タグ（コロン付き）を付与すること。
+・単体で変更可能な動詞（句動詞以外） → 動可:
+・句動詞（動詞+前置詞/副詞などの熟語） → 動不:
+・名詞 → 名:
+・形容詞 → 形:
+・副詞 → 副:
 
-※ 英語本文、カタカナルビ、日本語訳の全箇所においてカッコ囲みは使用禁止とする。
-例:
-肯: I 動可:like 名:apples. アイ 動可:ライク 名:アップルズ (私は名:りんごが動可:好きです)
-否: I'm 動不:looking for 形:different 名:one. アイム 動不:ルッキング フォー 形:ディファレント 名:ワン (私は形:別の名:ものを動不:探しています)
+※ 動詞以外の名詞・形容詞・副詞も言い換え可能箇所には必ずタグを付与すること。
 
-【文脈に応じた柔軟な長さ制御】
-・挨拶・天気・近況・相槌の場合：
-  1〜5単語程度の自然で短いフレーズにする。オウム返しや無用な長文は避ける。
-・5W1H質問・意見を求められた場合：
-  5〜10単語程度で明確に意思表示できる文章にする。`;
+【自然でネイティブな英語発音ルビ（カタカナ）指定】
+日本語の機械的なカナ変換（例: Yes→ヤス）を禁止し、フォニックス・英語ネイティブの発音記号に基づいた表記を厳守すること。
+・V音/F音: 「ヴェ / フェ」（例: very → ヴェリィ, feeling → フィーリング）
+・TH音: 「サ / ザ」（例: think → シンク）
+・R音: 巻き舌気味の表記（例: right → ライト）
+・Yes / Yeah: 「イエス」「イェア」に固定する。
+
+【出力例】
+肯: Yes, it's 動可:staying 形:very 名:hot. イエス イッツ 動可:ステイイング 形:ヴェリィ 名:ハット (はい、形:とても名:暑いままです)
+否: I'm 動不:looking for 形:different 名:options. アイム 動不:ルッキング フォー 形:ディファレント 名:オプションズ (私は形:別の名:選択肢を動不:探しています)`;
 
       try {
         setStatus('AIヒント生成中...');
