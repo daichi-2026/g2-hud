@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.28-FIX)</title>
+  <title>EVEN G2 Translator App (v5.29-FIX)</title>
   <style>
     body {
       background-color: #111;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.28-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.29-FIX</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -215,7 +215,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.28-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.29-FIX] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -227,7 +227,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.28-FIX";
+    const APP_VERSION = "v5.29-FIX";
 
     let bridge = null;
     let currentMode = 1;
@@ -426,7 +426,7 @@
       const systemPrompt = `${profileContext}あなたはリアルタイム会話アシスタントです。相手の発言（文脈全体）を踏まえ、スマートグラスに表示する最適な返答ヒントを生成してください。
 
 【1. 返答構成ルール】
-文脈に合った「肯：」（肯定・同意・相づち）と「否：」（否定・異議・別提案）の2パターンのみを過不足なく提示してください。
+文脈に合わせ、「肯：」（肯定・同意）、「否：」（否定・別提案）、および「疑：」（相手へ深掘りする質問・疑問文）の3パターンを必ず提示してください。
 
 【2. 品詞タグ付けルール（※英語本文のみに適用）】
 英語本文の中で言い換え可能な単語の直前には必ず品詞タグを付与してください。
@@ -441,7 +441,7 @@
 発音は日本語の機械的変換（Yes→ヤス）を避け、フォニックス（very→ヴェリィ, Yes→イエス）に基づいた表記にすること。
 
 【4. 表示フォーマット（3段改行）】
-英語本文、カタカナルビ、日本語訳をそれぞれ【改行】して3段に分けて出力してください。
+各パターン（肯：、否：、疑：）において、英語本文、カタカナルビ、日本語訳をそれぞれ【改行】して3段に分けて出力してください。
 
 【出力例】
 肯: Yes, it's 動可:staying 形:very 名:hot.
@@ -450,7 +450,11 @@
 
 否: I'm 動不:looking for 形:different 名:options.
 アイム ルッキング フォー ディファレント オプションズ
-(私は別の選択肢を探しています)`;
+(私は別の選択肢を探しています)
+
+疑: How are you 動可:keeping 形:cool?
+ハウ アー ユー キーピング クール
+(どのようにして涼しく過ごしていますか？)`;
 
       try {
         setStatus('AIヒント生成中...');
@@ -463,7 +467,7 @@
           body: JSON.stringify({
             model: 'gpt-4o-mini',
             temperature: 0.3,
-            max_tokens: 250,
+            max_tokens: 350,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: fullTextContext }
@@ -476,7 +480,6 @@
           const newHint = data.choices[0]?.message?.content?.trim() || "";
 
           if (newHint && historyList[historyIdx]) {
-            // 全体文脈に応じた最新のスマートなヒントで更新
             historyList[historyIdx].sessionHint = newHint;
             await updateDisplays();
             setStatus('処理完了・音声待機中');
@@ -507,7 +510,6 @@
       logError("テキスト更新", `[${historyIdx}][${chunkIdx}] ${cleanText}`);
       fetchGoogleTranslationAsync(historyIdx, chunkIdx, cleanText);
 
-      // 相手の今までの会話全文（コンテキスト）を渡して最新ヒントを生成
       const fullContext = currentItem.chunks.map(c => c.en).join(' ');
       fetchOpenAiHintAsync(historyIdx, fullContext);
 
@@ -588,7 +590,6 @@
       enElem.innerText = enText;
       jaElem.innerText = jaText;
 
-      // ブラウザ上のプレビュー枠を最新の最下部へ自動スクロール
       enElem.scrollTop = enElem.scrollHeight;
       jaElem.scrollTop = jaElem.scrollHeight;
 
