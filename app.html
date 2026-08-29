@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイム講義翻訳</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 16px;
+            background-color: #f5f5f7;
+            color: #1d1d1f;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        label {
+            font-size: 0.85rem;
+            font-weight: bold;
+            color: #6e6e73;
+            display: block;
+            margin-bottom: 4px;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 12px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+        .key-container {
+            display: flex;
+            gap: 8px;
+        }
+        .key-container input {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        .key-container button {
+            width: auto;
+            white-space: nowrap;
+            background-color: #86868b;
+            margin-bottom: 0;
+        }
+        .saved-hint {
+            font-size: 0.75rem;
+            color: #34c759;
+            margin-top: 4px;
+            margin-bottom: 12px;
+            display: none;
+        }
+        button.action-btn {
+            background-color: #0071e3;
+            color: white;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 8px;
+        }
+        button.action-btn:disabled {
+            background-color: #86868b;
+        }
+        button.action-btn.stop {
+            background-color: #ff3b30;
+        }
+        #status {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: #86868b;
+            text-align: center;
+            margin-bottom: 12px;
+        }
+        .speech-box {
+            height: 180px;
+            overflow-y: auto;
+            border: 1px solid #e5e5ea;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fafafa;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+        .translated {
+            color: #0071e3;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>リアルタイム講義翻訳</h2>
+    
+    <div class="card">
+        <label for="apiKey">Google Translate API Key</label>
+        <div class="key-container">
+            <input type="password" id="apiKey" placeholder="APIキーを入力">
+            <button id="clearKeyBtn" type="button">消去</button>
+        </div>
+        <div id="saveHint" class="saved-hint">✓ ブラウザに保存されています</div>
+        
+        <label for="targetLang">翻訳先言語</label>
+        <select id="targetLang">
+            <option value="ja" selected>日本語 (Japanese)</option>
+            <option value="en">英語 (English)</option>
+            <option value="zh">中国語 (Chinese)</option>
+            <option value="es">スペイン語 (Spanish)</option>
+        </select>
+
+        <button id="toggleBtn" class="action-btn">翻訳を開始する</button>
+        <div id="status">停止中</div>
+    </div>
+
+    <div class="card">
+        <label>認識された音声 (原文)</label>
+        <div id="originalText" class="speech-box"></div>
+    </div>
+
+    <div class="card">
+        <label>リアルタイム翻訳結果</label>
+        <div id="translatedText" class="speech-box translated"></div>
+    </div>
+</div>
+
+<script>
+    const STORAGE_KEY = 'google_translate_api_key';
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    let isListening = false;
+    let wakeLock = null;
+
+    const toggleBtn = document.getElementById('toggleBtn');
+    const statusDiv = document.getElementById('status');
+    const originalBox = document.getElementById('originalText');
+    const translatedBox = document.getElementById('translatedText');
+    const apiKeyInput = document.getElementById('apiKey');
+    const clearKeyBtn = document.getElementById('clearKeyBtn');
+    const saveHint = document.getElementById('saveHint');
+    const targetLangSelect = document.getElementById('targetLang');
+
+    // 初期化：保存されたAPIキーの読み込み
+    window.addEventListener('DOMContentLoaded', () => {
+        const savedKey = localStorage.getItem(STORAGE_KEY);
+        if (savedKey) {
+            apiKeyInput.value = savedKey;
+            saveHint.style.display = 'block';
+        }
+    });
+
+    // APIキー入力時に自動保存
+    apiKeyInput.addEventListener('input', () => {
+        const key = apiKeyInput.value.trim();
+        if (key) {
+            localStorage.setItem(STORAGE_KEY, key);
+            saveHint.style.display = 'block';
+        } else {
+            localStorage.removeItem(STORAGE_KEY);
+            saveHint.style.display = 'none';
+        }
+    });
+
+    // 消去ボタン処理
+    clearKeyBtn.addEventListener('click', () => {
+        apiKeyInput.value = '';
+        localStorage.removeItem(STORAGE_KEY);
+        saveHint.style.display = 'none';
+    });
+
+    if (!SpeechRecognition) {
+        alert('お使いのブラウザはWeb Speech APIに対応していません。スマホ版Chromeをご利用ください。');
+    } else {
+        initRecognition();
+    }
+
+    function initRecognition() {
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US'; // 講義の言語（必要に応じて変更）
+
+        recognition.onstart = () => {
+            statusDiv.textContent = '音声認識中...';
+            statusDiv.style.color = '#34c759';
+        };
+
+        recognition.onresult = async (event) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
+
+            if (finalTranscript) {
+                appendMessage(originalBox, finalTranscript);
+                const translated = await translateText(finalTranscript);
+                appendMessage(translatedBox, translated);
+            }
+        };
+
+        // 長時間運用対策：認識が切れたら自動再開
+        recognition.onend = () => {
+            if (isListening) {
+                recognition.start();
+            } else {
+                statusDiv.textContent = '停止中';
+                statusDiv.style.color = '#86868b';
+            }
+        };
+
+        recognition.onerror = (event) => {
+            console.error('Recognition error:', event.error);
+            if (event.error === 'no-speech' && isListening) {
+                return;
+            }
+        };
+    }
+
+    // 開始/停止ボタンの切り替え
+    toggleBtn.addEventListener('click', async () => {
+        if (!isListening) {
+            startTranslation();
+        } else {
+            stopTranslation();
+        }
+    });
+
+    async function startTranslation() {
+        isListening = true;
+        toggleBtn.textContent = '翻訳を停止する';
+        toggleBtn.classList.add('stop');
+        
+        requestWakeLock();
+        
+        try {
+            recognition.start();
+        } catch (e) {
+            console.log('Already started');
+        }
+    }
+
+    function stopTranslation() {
+        isListening = false;
+        toggleBtn.textContent = '翻訳を開始する';
+        toggleBtn.classList.remove('stop');
+        
+        if (recognition) recognition.stop();
+        releaseWakeLock();
+    }
+
+    // Google Translate Cloud API 呼び出し
+    async function translateText(text) {
+        const apiKey = apiKeyInput.value.trim();
+        const targetLang = targetLangSelect.value;
+
+        if (!apiKey) {
+            return '[APIキー未入力] ' + text;
+        }
+
+        const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    q: text,
+                    target: targetLang
+                })
+            });
+            const data = await response.json();
+            if (data.data && data.data.translations.length > 0) {
+                return data.data.translations[0].translatedText;
+            }
+            return '[翻訳エラー]';
+        } catch (error) {
+            console.error('Translation Error:', error);
+            return '[通信エラー]';
+        }
+    }
+
+    // 画面スリープ防止処理
+    async function requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                wakeLock = await navigator.wakeLock.request('screen');
+            }
+        } catch (err) {
+            console.error(`${err.name}, ${err.message}`);
+        }
+    }
+
+    function releaseWakeLock() {
+        if (wakeLock !== null) {
+            wakeLock.release();
+            wakeLock = null;
+        }
+    }
+
+    function appendMessage(element, text) {
+        const p = document.createElement('p');
+        p.style.margin = '0 0 8px 0';
+        p.textContent = text;
+        element.appendChild(p);
+        element.scrollTop = element.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
