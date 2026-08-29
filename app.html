@@ -9,7 +9,7 @@
         .container { max-width: 600px; margin: 0 auto; }
         .card { background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .header-title { display: flex; align-items: center; justify-content: space-between; }
-        .version-tag { background: #0071e3; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+        .version-tag { background: #ff9500; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
         label { font-size: 0.85rem; font-weight: bold; color: #6e6e73; display: block; margin-bottom: 4px; }
         input, select, button { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
         .key-container { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -31,7 +31,9 @@
         .setting-group { display: flex; gap: 8px; }
         .setting-group > div { flex: 1; }
 
-        .debug-box { height: 120px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; }
+        .interim-text { color: #86868b; font-style: italic; }
+
+        .debug-box { height: 140px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; }
         .volume-bar-bg { width: 100%; height: 8px; background: #e5e5ea; border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
         .volume-bar-fill { height: 100%; width: 0%; background: #34c759; transition: width 0.1s ease; }
     </style>
@@ -41,7 +43,7 @@
 <div class="container">
     <div class="header-title">
         <h2>リアルタイム講義翻訳</h2>
-        <span class="version-tag">v1.3 (EN → JA)</span>
+        <span class="version-tag">v1.4 (Interim Ready)</span>
     </div>
     
     <div class="card">
@@ -128,12 +130,17 @@
 
     let socket = null;
     let mediaStream = null;
+    let mediaRecorder = null;
     let audioContext = null;
-    let scriptProcessor = null;
+    let analyser = null;
+    let animFrameId = null;
     let keepAliveTimer = null;
     let isListening = false;
     let wakeLock = null;
     let availableVoices = [];
+
+    // 途中経過（確定前）の表示要素
+    let interimOriginalElem = null;
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
@@ -168,7 +175,7 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        log("システム初期化完了 (v1.3 - EN to JA)");
+        log("システム初期化完了 (v1.4 - Stream Ready)");
         const savedDgKey = localStorage.getItem(STORAGE_DG_KEY);
         if (savedDgKey) {
             deepgramKeyInput.value = savedDgKey;
@@ -288,12 +295,19 @@
             return;
         }
 
-        log("マイク許可を取得中...");
+        log("マイク接続要求中...");
         try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            log("マイク接続完了");
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+            log("マイクアクセスの許可を取得しました");
+            startVolumeMonitor(mediaStream);
         } catch (e) {
-            log("マイクアクセス拒否: " + e.message, 'error');
+            log("マイクエラー: " + e.message, 'error');
             errorLog.textContent = 'マイクのアクセスが拒否されました。';
             return;
         }
@@ -309,21 +323,21 @@
         const srcLang = sourceLangSelect.value;
         const model = srcLang === 'ja' ? 'general' : 'nova-2';
         
-        const sampleRate = 16000;
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&encoding=linear16&sample_rate=${sampleRate}&channels=1&punctuate=true&smart_formatting=true&interim_results=true`;
+        // パラメータを最新仕様に最適化 (endpointing, utterance_end_ms)
+        const dgUrl = `wss://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&punctuate=true&smart_formatting=true&interim_results=true&endpointing=300&utterance_end_ms=1000`;
         
-        log(`Deepgram接続開始: lang=${srcLang}, model=${model}`);
+        log(`Deepgram接続要求: lang=${srcLang}, model=${model}`);
 
         try {
             socket = new WebSocket(dgUrl, ['token', dgKey]);
         } catch(e) {
-            log("WebSocket生成例外: " + e.message, 'error');
+            log("WebSocket作成失敗: " + e.message, 'error');
             stopTranslation();
             return;
         }
 
         socket.onopen = () => {
-            log("Deepgram WebSocket接続成功 (OPEN)");
+            log("WebSocket接続成功 (OPEN)");
             statusDiv.textContent = '音声認識中 (Deepgram)...';
             statusDiv.style.color = '#34c759';
 
@@ -333,7 +347,7 @@
                 }
             }, 5000);
 
-            startAudioProcessing(mediaStream, sampleRate);
+            startAudioRecording(mediaStream);
         };
 
         socket.onmessage = async (message) => {
@@ -349,30 +363,34 @@
                 const isFinal = received.is_final;
 
                 if (transcript && transcript.length > 0) {
-                    log(`認識 (${isFinal ? '確定' : '途中'}): "${transcript}"`);
-                }
-
-                // 1文として判定が確定（is_final）したタイミングでGoogle APIへ渡す
-                if (isFinal && transcript && transcript.trim().length > 0) {
-                    appendMessage(originalBox, transcript);
-                    log(`Google翻訳送信中...`);
-                    const translated = await translateText(transcript);
-                    log(`翻訳結果: "${translated}"`);
-                    appendMessage(translatedBox, translated);
-                    speakText(translated);
+                    if (isFinal) {
+                        // 確定テキストの表示と翻訳
+                        log(`[確定原文]: "${transcript}"`);
+                        removeInterimText();
+                        appendMessage(originalBox, transcript);
+                        
+                        log(`Google翻訳実行中...`);
+                        const translated = await translateText(transcript);
+                        log(`[確定翻訳]: "${translated}"`);
+                        appendMessage(translatedBox, translated);
+                        speakText(translated);
+                    } else {
+                        // 話している最中の途中テキスト（リアルタイム表示）
+                        updateInterimText(transcript);
+                    }
                 }
             } catch (e) {
-                log("レスポンス解析エラー: " + e.message, 'warn');
+                log("レスポンス解釈エラー: " + e.message, 'warn');
             }
         };
 
         socket.onerror = (error) => {
-            log("WebSocket通信エラー発生", 'error');
+            log("WebSocketエラーが発生しました", 'error');
             errorLog.textContent = '接続エラーが発生しました。';
         };
 
         socket.onclose = (event) => {
-            log(`切断されました: Code=${event.code}, Reason="${event.reason}"`, 'warn');
+            log(`接続切断: Code=${event.code}, Reason="${event.reason}"`, 'warn');
             if (isListening) {
                 errorLog.textContent = `接続が切断されました (Code: ${event.code})`;
                 stopTranslation();
@@ -380,66 +398,70 @@
         };
     }
 
-    function startAudioProcessing(stream, targetSampleRate) {
+    function startVolumeMonitor(stream) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
         const source = audioContext.createMediaStreamSource(stream);
-        scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+        source.connect(analyser);
+        analyser.fftSize = 256;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
-        let packetCount = 0;
-
-        scriptProcessor.onaudioprocess = (e) => {
-            if (!isListening || !socket || socket.readyState !== WebSocket.OPEN) return;
-
-            const inputBuffer = e.inputBuffer.getChannelData(0);
-            
-            // 音量メーター表示
+        function updateVolume() {
+            if (!isListening) return;
+            analyser.getByteFrequencyData(dataArray);
             let sum = 0;
-            for (let i = 0; i < inputBuffer.length; i++) {
-                sum += Math.abs(inputBuffer[i]);
-            }
-            let avg = sum / inputBuffer.length;
-            volumeFill.style.width = Math.min(100, Math.floor(avg * 400)) + '%';
-
-            // 生PCMデータ送信
-            const pcm16Data = downsampleBuffer(inputBuffer, audioContext.sampleRate, targetSampleRate);
-            socket.send(pcm16Data);
-            
-            packetCount++;
-            if (packetCount % 20 === 0) {
-                log(`生PCMデータ送信中 (${packetCount}パケット完了)`);
-            }
-        };
-
-        source.connect(scriptProcessor);
-        scriptProcessor.connect(audioContext.destination);
+            for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+            let average = sum / dataArray.length;
+            let val = Math.min(100, Math.floor((average / 128) * 100));
+            volumeFill.style.width = val + '%';
+            animFrameId = requestAnimationFrame(updateVolume);
+        }
+        updateVolume();
     }
 
-    function downsampleBuffer(buffer, sampleRate, outSampleRate) {
-        if (outSampleRate === sampleRate) {
-            const result = new Int16Array(buffer.length);
-            for (let i = 0; i < buffer.length; i++) {
-                result[i] = Math.max(-1, Math.min(1, buffer[i])) * 0x7FFF;
-            }
-            return result.buffer;
+    function startAudioRecording(stream) {
+        let options = {};
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            options = { mimeType: 'audio/webm;codecs=opus' };
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+            options = { mimeType: 'audio/webm' };
         }
-        const sampleRateRatio = sampleRate / outSampleRate;
-        const newLength = Math.round(buffer.length / sampleRateRatio);
-        const result = new Int16Array(newLength);
-        let offsetResult = 0;
-        let offsetBuffer = 0;
-        while (offsetResult < result.length) {
-            const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-            let accum = 0, count = 0;
-            for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-                accum += buffer[i];
+
+        log(`MediaRecorder使用フォーマット: ${options.mimeType || 'Default'}`);
+
+        mediaRecorder = new MediaRecorder(stream, options);
+
+        let count = 0;
+        mediaRecorder.addEventListener('dataavailable', (event) => {
+            if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(event.data);
                 count++;
+                if (count % 20 === 0) {
+                    log(`音声パケット送信継続中 (${count}個完了)`);
+                }
             }
-            const arg = count > 0 ? accum / count : 0;
-            result[offsetResult] = Math.max(-1, Math.min(1, arg)) * 0x7FFF;
-            offsetResult++;
-            offsetBuffer = nextOffsetBuffer;
+        });
+
+        // 250ms刻みでリアルタイム送信
+        mediaRecorder.start(250);
+    }
+
+    function updateInterimText(text) {
+        if (!interimOriginalElem) {
+            interimOriginalElem = document.createElement('p');
+            interimOriginalElem.className = 'interim-text';
+            interimOriginalElem.style.margin = '0 0 8px 0';
+            originalBox.appendChild(interimOriginalElem);
         }
-        return result.buffer;
+        interimOriginalElem.textContent = '... ' + text;
+        originalBox.scrollTop = originalBox.scrollHeight;
+    }
+
+    function removeInterimText() {
+        if (interimOriginalElem) {
+            originalBox.removeChild(interimOriginalElem);
+            interimOriginalElem = null;
+        }
     }
 
     function stopTranslation() {
@@ -450,9 +472,16 @@
         statusDiv.style.color = '#86868b';
         volumeFill.style.width = '0%';
 
+        removeInterimText();
+
         if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
-        if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
+        if (animFrameId) { cancelAnimationFrame(animFrameId); }
         if (audioContext) { audioContext.close(); audioContext = null; }
+
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+            mediaRecorder = null;
+        }
 
         if (mediaStream) {
             mediaStream.getTracks().forEach(track => track.stop());
@@ -469,7 +498,7 @@
         }
 
         releaseWakeLock();
-        log("処理を安全に停止しました");
+        log("正常停止しました");
     }
 
     async function translateText(text) {
@@ -490,10 +519,10 @@
             if (data.data && data.data.translations.length > 0) {
                 return data.data.translations[0].translatedText;
             }
-            log("Google APIレスポンスエラー: " + JSON.stringify(data), 'error');
+            log("Google APIエラー: " + JSON.stringify(data), 'error');
             return '[翻訳エラー]';
         } catch (error) {
-            log("Google API通信エラー: " + error.message, 'error');
+            log("Google 通信エラー: " + error.message, 'error');
             return '[通信エラー]';
         }
     }
