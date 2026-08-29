@@ -119,6 +119,12 @@
             color: #0071e3;
             font-weight: 500;
         }
+        .error-msg {
+            color: #ff3b30;
+            font-size: 0.85rem;
+            text-align: center;
+            margin-top: 4px;
+        }
     </style>
 </head>
 <body>
@@ -172,6 +178,7 @@
 
         <button id="toggleBtn" class="action-btn">翻訳を開始する</button>
         <div id="status">停止中</div>
+        <div id="errorLog" class="error-msg"></div>
     </div>
 
     <div class="card">
@@ -198,6 +205,7 @@
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
+    const errorLog = document.getElementById('errorLog');
     const originalBox = document.getElementById('originalText');
     const translatedBox = document.getElementById('translatedText');
 
@@ -318,6 +326,7 @@
     });
 
     async function startTranslation() {
+        errorLog.textContent = '';
         const dgKey = deepgramKeyInput.value.trim();
         const gKey = googleKeyInput.value.trim();
 
@@ -329,37 +338,44 @@
         try {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (e) {
-            alert('マイクのアクセス許可が必要です。');
+            errorLog.textContent = 'マイクのアクセスが拒否されました。';
             return;
         }
 
         isListening = true;
         toggleBtn.textContent = '翻訳を停止する';
         toggleBtn.classList.add('stop');
-        statusDiv.textContent = '接続中...';
+        statusDiv.textContent = 'Deepgramへ接続中...';
         statusDiv.style.color = '#0071e3';
 
         requestWakeLock();
 
-        // ブラウザの対応MIMEタイプを自動検出
-        let mimeType = 'audio/webm';
-        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-            mimeType = 'audio/webm;codecs=opus';
-        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
-            mimeType = 'audio/mp4';
-        }
+        // 確実性の高いURLクエリパラメータ方式に変更
+        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&smart_formatting=true&interim_results=true&token=${dgKey}`;
 
-        // Deepgram URL（設定を安全なパラメータ構成に修正）
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&smart_formatting=true`;
-        
-        // Deepgram接続（Tokenプロトコル渡し）
-        socket = new WebSocket(dgUrl, ['token', dgKey]);
+        try {
+            socket = new WebSocket(dgUrl);
+        } catch(e) {
+            errorLog.textContent = 'WebSocketの作成に失敗しました。';
+            stopTranslation();
+            return;
+        }
 
         socket.onopen = () => {
             statusDiv.textContent = '音声認識中 (Deepgram)...';
             statusDiv.style.color = '#34c759';
 
-            mediaRecorder = new MediaRecorder(audioStream, { mimeType: mimeType });
+            let options = {};
+            if (MediaRecorder.isTypeSupported('audio/webm')) {
+                options = { mimeType: 'audio/webm' };
+            }
+
+            try {
+                mediaRecorder = new MediaRecorder(audioStream, options);
+            } catch (e) {
+                mediaRecorder = new MediaRecorder(audioStream);
+            }
+
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(event.data);
@@ -371,11 +387,10 @@
         socket.onmessage = async (message) => {
             try {
                 const received = JSON.parse(message.data);
-                // 確定した認識結果（is_final）かつ空でない場合のみ処理
-                const isFinal = received.is_final;
                 const transcript = received.channel?.alternatives[0]?.transcript;
 
-                if (isFinal && transcript && transcript.trim().length > 0) {
+                // interim_results判定: is_final または speech_final がtrueでテキストがある場合
+                if ((received.is_final || received.speech_final) && transcript && transcript.trim().length > 0) {
                     appendMessage(originalBox, transcript);
                     const translated = await translateText(transcript);
                     appendMessage(translatedBox, translated);
@@ -388,12 +403,14 @@
 
         socket.onerror = (error) => {
             console.error('Deepgram WebSocket Error:', error);
-            statusDiv.textContent = 'エラーが発生しました（キーをご確認ください）';
-            statusDiv.style.color = '#ff3b30';
+            errorLog.textContent = 'Deepgram接続エラー（APIキーが無効か制限されています）';
         };
 
         socket.onclose = (event) => {
             if (isListening) {
+                if (event.code !== 1000) {
+                    errorLog.textContent = `接続が切断されました (Code: ${event.code})`;
+                }
                 stopTranslation();
             }
         };
@@ -407,13 +424,13 @@
         statusDiv.style.color = '#86868b';
 
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
+            try { mediaRecorder.stop(); } catch(e){}
         }
         if (audioStream) {
             audioStream.getTracks().forEach(track => track.stop());
         }
         if (socket) {
-            socket.close();
+            try { socket.close(); } catch(e){}
         }
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
