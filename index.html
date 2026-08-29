@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>EVEN G2 Translator App (v5.30-FIX)</title>
+  <title>EVEN G2 Translator App (v5.31-TTS)</title>
   <style>
     body {
       background-color: #111;
@@ -95,7 +95,7 @@
       border-radius: 10px;
       font-weight: bold;
     }
-    input, textarea, button {
+    input, textarea, button, select {
       background: #222;
       border: 1px solid #444;
       color: #fff;
@@ -167,7 +167,7 @@
   <div class="control-panel">
     <h2>
       <span>G2 音声翻訳＆返答アシスト</span>
-      <span class="version-badge" id="versionBadge">v5.30-FIX</span>
+      <span class="version-badge" id="versionBadge">v5.31-TTS</span>
     </h2>
     <div>
       <label>Google Translate API Key (和訳用):</label>
@@ -185,6 +185,32 @@
     <div>
       <label style="color:#00FF00; font-weight:bold;">思考プロファイル・キーワード (AI連携用):</label>
       <textarea id="userProfile" rows="2" placeholder="例: 経理財務 / 丁寧かつ結論ファースト / 趣味: 読書 / 返答方針: 簡潔に" style="width:100%; box-sizing:border-box;"></textarea>
+    </div>
+
+    <!-- 和訳音声読み上げ（TTS）設定エリア -->
+    <div style="border:1px solid #00AA00; padding:8px; border-radius:4px; background:#0a1a0a;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <label style="color:#00FF00; font-weight:bold;">🎧 イヤホン和訳読み上げ (Web Speech API)</label>
+        <label style="font-size:11px; cursor:pointer;">
+          <input type="checkbox" id="ttsEnable" checked style="vertical-align:middle;"> 有効
+        </label>
+      </div>
+      <div style="display:flex; gap:6px; flex-direction:column;">
+        <div>
+          <label style="font-size:10px;">音声エンジン（日本語のみ抽出）:</label>
+          <select id="ttsVoiceSelect" style="width:100%; box-sizing:border-box; font-size:11px;"></select>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <div style="flex:1;">
+            <label style="font-size:10px;">速度: <span id="ttsRateVal">1.1</span>x</label>
+            <input type="range" id="ttsRate" min="0.8" max="2.0" step="0.1" value="1.1" style="width:100%;" oninput="document.getElementById('ttsRateVal').innerText = this.value" />
+          </div>
+          <div style="flex:1;">
+            <label style="font-size:10px;">ピッチ (高低): <span id="ttsPitchVal">1.0</span></label>
+            <input type="range" id="ttsPitch" min="0.5" max="1.5" step="0.1" value="1.0" style="width:100%;" oninput="document.getElementById('ttsPitchVal').innerText = this.value" />
+          </div>
+        </div>
+      </div>
     </div>
     
     <div>
@@ -215,7 +241,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細デバッグ・エラーログ】</span>
       <button onclick="window.clearErrorLog()" style="padding:2px 6px; font-size:10px; background:#444;">クリア</button>
     </div>
-    <div id="errorLog" class="error-log-box">[System initialized v5.30-FIX] ログ待機中...</div>
+    <div id="errorLog" class="error-log-box">[System initialized v5.31-TTS] ログ待機中...</div>
   </div>
 
   <script type="module">
@@ -227,7 +253,7 @@
       OsEventTypeList
     } from 'https://cdn.jsdelivr.net/npm/@evenrealities/even_hub_sdk/+esm';
 
-    const APP_VERSION = "v5.30-FIX";
+    const APP_VERSION = "v5.31-TTS";
 
     let bridge = null;
     let currentMode = 1;
@@ -247,6 +273,9 @@
     let lastEnContent = "";
     let lastJaContent = "";
 
+    // Web Speech API Voice 保持用変数
+    let availableJaVoices = [];
+
     function initKeyStorage() {
       const gEl = document.getElementById('googleKey');
       const dEl = document.getElementById('deepgramKey');
@@ -262,6 +291,69 @@
       if (dEl) dEl.addEventListener('input', (e) => localStorage.setItem('deepgram_api_key', e.target.value.trim()));
       if (oEl) oEl.addEventListener('input', (e) => localStorage.setItem('openai_api_key', e.target.value.trim()));
       if (pEl) pEl.addEventListener('input', (e) => localStorage.setItem('user_profile_keywords', e.target.value));
+    }
+
+    // Web Speech API の日本語音声をロード・ドロップダウン生成
+    function initSpeechSynthesis() {
+      if (!('speechSynthesis' in window)) {
+        logError("TTS", "お使いのブラウザはWeb Speech APIに対応していません。");
+        return;
+      }
+
+      function populateVoices() {
+        const voices = window.speechSynthesis.getVoices();
+        availableJaVoices = voices.filter(v => v.lang.startsWith('ja'));
+
+        const select = document.getElementById('ttsVoiceSelect');
+        if (!select) return;
+
+        select.innerHTML = '';
+        if (availableJaVoices.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = "";
+          opt.innerText = "日本語音声が端末に見つかりません (デフォルト利用)";
+          select.appendChild(opt);
+          return;
+        }
+
+        availableJaVoices.forEach((voice, index) => {
+          const opt = document.createElement('option');
+          opt.value = index;
+          opt.innerText = `${voice.name} (${voice.lang})`;
+          select.appendChild(opt);
+        });
+      }
+
+      populateVoices();
+      if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = populateVoices;
+      }
+    }
+
+    // 和訳テキスト読み上げ実行関数
+    function speakJapaneseText(text) {
+      const isEnabled = document.getElementById('ttsEnable')?.checked;
+      if (!isEnabled || !text || !('speechSynthesis' in window)) return;
+
+      window.speechSynthesis.cancel(); // 前の読み上げがあれば中断
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ja-JP';
+
+      const voiceSelect = document.getElementById('ttsVoiceSelect');
+      const selectedIndex = voiceSelect ? parseInt(voiceSelect.value, 10) : NaN;
+
+      if (!isNaN(selectedIndex) && availableJaVoices[selectedIndex]) {
+        utterance.voice = availableJaVoices[selectedIndex];
+      }
+
+      const rateInput = document.getElementById('ttsRate');
+      const pitchInput = document.getElementById('ttsPitch');
+
+      if (rateInput) utterance.rate = parseFloat(rateInput.value) || 1.1;
+      if (pitchInput) utterance.pitch = parseFloat(pitchInput.value) || 1.0;
+
+      window.speechSynthesis.speak(utterance);
     }
 
     function getInputValue(id) {
@@ -409,6 +501,9 @@
           if (translatedText && historyList[historyIdx]?.chunks[chunkIdx]) {
             historyList[historyIdx].chunks[chunkIdx].ja = translatedText;
             await updateDisplays();
+
+            // 和訳取得完了と同時に音声読み上げを実行（Bluetoothイヤホンへ再生）
+            speakJapaneseText(translatedText);
           }
         }
       } catch (e) {
@@ -647,6 +742,7 @@
       preRingBuffer = [];
       if (chunkTimer) clearTimeout(chunkTimer);
       chunkTimer = null;
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
       await updateDisplays();
       setStatus('履歴クリア完了');
     };
@@ -688,6 +784,7 @@
 
     async function initG2() {
       initKeyStorage();
+      initSpeechSynthesis();
 
       try {
         setStatus(`接続中... [${APP_VERSION}]`);
