@@ -350,13 +350,13 @@
 
         requestWakeLock();
 
-        // 確実性の高いURLクエリパラメータ方式に変更
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&smart_formatting=true&interim_results=true&token=${dgKey}`;
+        // 接続プロトコルを 'token' + API Key に修正
+        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&smart_formatting=true`;
 
         try {
-            socket = new WebSocket(dgUrl);
+            socket = new WebSocket(dgUrl, ['token', dgKey]);
         } catch(e) {
-            errorLog.textContent = 'WebSocketの作成に失敗しました。';
+            errorLog.textContent = 'WebSocket作成エラー';
             stopTranslation();
             return;
         }
@@ -365,13 +365,15 @@
             statusDiv.textContent = '音声認識中 (Deepgram)...';
             statusDiv.style.color = '#34c759';
 
-            let options = {};
-            if (MediaRecorder.isTypeSupported('audio/webm')) {
-                options = { mimeType: 'audio/webm' };
+            let mimeType = '';
+            if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+                mimeType = 'audio/webm;codecs=opus';
+            } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+                mimeType = 'audio/webm';
             }
 
             try {
-                mediaRecorder = new MediaRecorder(audioStream, options);
+                mediaRecorder = mimeType ? new MediaRecorder(audioStream, { mimeType }) : new MediaRecorder(audioStream);
             } catch (e) {
                 mediaRecorder = new MediaRecorder(audioStream);
             }
@@ -389,8 +391,7 @@
                 const received = JSON.parse(message.data);
                 const transcript = received.channel?.alternatives[0]?.transcript;
 
-                // interim_results判定: is_final または speech_final がtrueでテキストがある場合
-                if ((received.is_final || received.speech_final) && transcript && transcript.trim().length > 0) {
+                if (received.is_final && transcript && transcript.trim().length > 0) {
                     appendMessage(originalBox, transcript);
                     const translated = await translateText(transcript);
                     appendMessage(translatedBox, translated);
@@ -403,13 +404,15 @@
 
         socket.onerror = (error) => {
             console.error('Deepgram WebSocket Error:', error);
-            errorLog.textContent = 'Deepgram接続エラー（APIキーが無効か制限されています）';
+            errorLog.textContent = '接続エラーが発生しました。キーを確認してください。';
         };
 
         socket.onclose = (event) => {
             if (isListening) {
-                if (event.code !== 1000) {
-                    errorLog.textContent = `接続が切断されました (Code: ${event.code})`;
+                if (event.code === 1006) {
+                    errorLog.textContent = '接続エラー (Code: 1006): API Keyが無効、または期限切れの可能性があります。';
+                } else if (event.code !== 1000) {
+                    errorLog.textContent = `接続切断 (Code: ${event.code})`;
                 }
                 stopTranslation();
             }
