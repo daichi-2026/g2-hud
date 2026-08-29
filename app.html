@@ -244,12 +244,6 @@
             return;
         }
 
-        // ブラウザの自動再生ポリシー対策：ユーザー操作（クリック時）にAudioContextを作成・リジューム
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        if (audioContext.state === 'suspended') {
-            await audioContext.resume();
-        }
-
         isListening = true;
         toggleBtn.textContent = '翻訳を停止する';
         toggleBtn.classList.add('stop');
@@ -258,11 +252,12 @@
 
         requestWakeLock();
 
-        // クエリパラメータの安全なビルドとパラメータ最小化（1006エラー防止）
-        const dgUrl = `wss://api.deepgram.com/v1/listen?token=${encodeURIComponent(dgKey)}&encoding=linear16&sample_rate=16000&channels=1&punctuate=true`;
+        // Deepgramが必須とする標準パラメータ（model=nova-2, language=en等）を明示
+        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&encoding=linear16&sample_rate=16000&channels=1&punctuate=true&smart_formatting=true`;
 
         try {
-            socket = new WebSocket(dgUrl);
+            // プロトコルヘッダー（Sec-WebSocket-Protocol）を使ってトークンを安全に渡す
+            socket = new WebSocket(dgUrl, ['token', dgKey]);
         } catch(e) {
             errorLog.textContent = 'WebSocket作成エラー';
             stopTranslation();
@@ -305,27 +300,38 @@
         socket.onclose = (event) => {
             if (isListening) {
                 console.log('Closed code:', event.code, 'reason:', event.reason);
-                errorLog.textContent = `接続切断 (Code: ${event.code}) - 送信形式または通信の切断です。`;
+                errorLog.textContent = `接続切断 (Code: ${event.code}) - パラメータ設定またはデータ形式のエラーです。`;
                 stopTranslation();
             }
         };
     }
 
     function startAudioProcessing(stream) {
-        if (!audioContext) return;
-
+        // マイクの元のサンプルレートを維持しつつ16kHzへリサンプルして安定化
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        
         const source = audioContext.createMediaStreamSource(stream);
         processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        const targetSampleRate = 16000;
+        const inputSampleRate = audioContext.sampleRate;
 
         processor.onaudioprocess = (e) => {
             if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
             const inputData = e.inputBuffer.getChannelData(0);
-            const pcm16 = new Int16Array(inputData.length);
-            for (let i = 0; i < inputData.length; i++) {
-                let s = Math.max(-1, Math.min(1, inputData[i]));
+            
+            // 簡易ダウンスピーチ（サンプリングレート変換）
+            const compression = inputSampleRate / targetSampleRate;
+            const outputLength = Math.floor(inputData.length / compression);
+            const pcm16 = new Int16Array(outputLength);
+
+            for (let i = 0; i < outputLength; i++) {
+                let index = Math.floor(i * compression);
+                let s = Math.max(-1, Math.min(1, inputData[index]));
                 pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
             }
+
             socket.send(pcm16.buffer);
         };
 
