@@ -60,6 +60,31 @@
             margin-bottom: 12px;
             display: none;
         }
+        .tts-config {
+            background: #f2f2f7;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+        .tts-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .tts-row label {
+            margin-bottom: 0;
+        }
+        .range-container {
+            display: flex;
+            gap: 12px;
+        }
+        .range-item {
+            flex: 1;
+        }
+        .range-item label {
+            font-size: 0.75rem;
+        }
         button.action-btn {
             background-color: #0071e3;
             color: white;
@@ -68,9 +93,6 @@
             cursor: pointer;
             transition: background 0.2s;
             margin-top: 8px;
-        }
-        button.action-btn:disabled {
-            background-color: #86868b;
         }
         button.action-btn.stop {
             background-color: #ff3b30;
@@ -115,9 +137,28 @@
         <select id="targetLang">
             <option value="ja" selected>日本語 (Japanese)</option>
             <option value="en">英語 (English)</option>
-            <option value="zh">中国語 (Chinese)</option>
-            <option value="es">スペイン語 (Spanish)</option>
         </select>
+
+        <!-- 音声読み上げ（TTS）設定 -->
+        <div class="tts-config">
+            <div class="tts-row">
+                <label for="ttsEnable">🎧 和訳の音声読み上げ</label>
+                <input type="checkbox" id="ttsEnable" checked style="width: auto; margin-bottom: 0;">
+            </div>
+            <label for="ttsVoiceSelect" style="font-size:0.75rem;">読み上げ音声エンジン</label>
+            <select id="ttsVoiceSelect" style="padding: 8px; font-size: 0.85rem; margin-bottom: 8px;"></select>
+            
+            <div class="range-container">
+                <div class="range-item">
+                    <label>速度: <span id="ttsRateVal">1.2</span>x</label>
+                    <input type="range" id="ttsRate" min="0.8" max="2.0" step="0.1" value="1.2" oninput="document.getElementById('ttsRateVal').innerText = this.value">
+                </div>
+                <div class="range-item">
+                    <label>ピッチ: <span id="ttsPitchVal">1.0</span></label>
+                    <input type="range" id="ttsPitch" min="0.5" max="1.5" step="0.1" value="1.0" oninput="document.getElementById('ttsPitchVal').innerText = this.value">
+                </div>
+            </div>
+        </div>
 
         <button id="toggleBtn" class="action-btn">翻訳を開始する</button>
         <div id="status">停止中</div>
@@ -141,6 +182,7 @@
     let recognition = null;
     let isListening = false;
     let wakeLock = null;
+    let availableJaVoices = [];
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
@@ -150,17 +192,21 @@
     const clearKeyBtn = document.getElementById('clearKeyBtn');
     const saveHint = document.getElementById('saveHint');
     const targetLangSelect = document.getElementById('targetLang');
+    const ttsEnable = document.getElementById('ttsEnable');
+    const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
+    const ttsRate = document.getElementById('ttsRate');
+    const ttsPitch = document.getElementById('ttsPitch');
 
-    // 初期化：保存されたAPIキーの読み込み
+    // 初期化：APIキー復元 & 音声エンジン取得
     window.addEventListener('DOMContentLoaded', () => {
         const savedKey = localStorage.getItem(STORAGE_KEY);
         if (savedKey) {
             apiKeyInput.value = savedKey;
             saveHint.style.display = 'block';
         }
+        initSpeechSynthesis();
     });
 
-    // APIキー入力時に自動保存
     apiKeyInput.addEventListener('input', () => {
         const key = apiKeyInput.value.trim();
         if (key) {
@@ -172,12 +218,62 @@
         }
     });
 
-    // 消去ボタン処理
     clearKeyBtn.addEventListener('click', () => {
         apiKeyInput.value = '';
         localStorage.removeItem(STORAGE_KEY);
         saveHint.style.display = 'none';
     });
+
+    // Web Speech API (音声読み上げ) 初期化
+    function initSpeechSynthesis() {
+        if (!('speechSynthesis' in window)) return;
+
+        function populateVoices() {
+            const voices = window.speechSynthesis.getVoices();
+            availableJaVoices = voices.filter(v => v.lang.startsWith('ja'));
+            ttsVoiceSelect.innerHTML = '';
+
+            if (availableJaVoices.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = "";
+                opt.innerText = "標準音声（自動選択）";
+                ttsVoiceSelect.appendChild(opt);
+                return;
+            }
+
+            availableJaVoices.forEach((voice, index) => {
+                const opt = document.createElement('option');
+                opt.value = index;
+                opt.innerText = `${voice.name} (${voice.lang})`;
+                ttsVoiceSelect.appendChild(opt);
+            });
+        }
+
+        populateVoices();
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = populateVoices;
+        }
+    }
+
+    // 和訳音声読み上げ実行関数
+    function speakJapaneseText(text) {
+        if (!ttsEnable.checked || !text || !('speechSynthesis' in window)) return;
+
+        window.speechSynthesis.cancel(); // 割り込み再生のため直前の音声を停止
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ja-JP';
+
+        const selectedIndex = parseInt(ttsVoiceSelect.value, 10);
+        if (!isNaN(selectedIndex) && availableJaVoices[selectedIndex]) {
+            utterance.voice = availableJaVoices[selectedIndex];
+        }
+
+        utterance.rate = parseFloat(ttsRate.value) || 1.2;
+        utterance.pitch = parseFloat(ttsPitch.value) || 1.0;
+
+        window.speechSynthesis.speak(utterance);
+    }
 
     if (!SpeechRecognition) {
         alert('お使いのブラウザはWeb Speech APIに対応していません。スマホ版Chromeをご利用ください。');
@@ -189,7 +285,7 @@
         recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
-        recognition.lang = 'en-US'; // 講義の言語（必要に応じて変更）
+        recognition.lang = 'en-US';
 
         recognition.onstart = () => {
             statusDiv.textContent = '音声認識中...';
@@ -197,14 +293,11 @@
         };
 
         recognition.onresult = async (event) => {
-            let interimTranscript = '';
             let finalTranscript = '';
 
             for (let i = event.resultIndex; i < event.results.length; ++i) {
                 if (event.results[i].isFinal) {
                     finalTranscript += event.results[i][0].transcript;
-                } else {
-                    interimTranscript += event.results[i][0].transcript;
                 }
             }
 
@@ -212,10 +305,12 @@
                 appendMessage(originalBox, finalTranscript);
                 const translated = await translateText(finalTranscript);
                 appendMessage(translatedBox, translated);
+                
+                // 翻訳完了と同時にイヤホン/スピーカーから音声再生
+                speakJapaneseText(translated);
             }
         };
 
-        // 長時間運用対策：認識が切れたら自動再開
         recognition.onend = () => {
             if (isListening) {
                 recognition.start();
@@ -226,14 +321,10 @@
         };
 
         recognition.onerror = (event) => {
-            console.error('Recognition error:', event.error);
-            if (event.error === 'no-speech' && isListening) {
-                return;
-            }
+            if (event.error === 'no-speech' && isListening) return;
         };
     }
 
-    // 開始/停止ボタンの切り替え
     toggleBtn.addEventListener('click', async () => {
         if (!isListening) {
             startTranslation();
@@ -246,33 +337,24 @@
         isListening = true;
         toggleBtn.textContent = '翻訳を停止する';
         toggleBtn.classList.add('stop');
-        
         requestWakeLock();
-        
-        try {
-            recognition.start();
-        } catch (e) {
-            console.log('Already started');
-        }
+        try { recognition.start(); } catch (e) {}
     }
 
     function stopTranslation() {
         isListening = false;
         toggleBtn.textContent = '翻訳を開始する';
         toggleBtn.classList.remove('stop');
-        
         if (recognition) recognition.stop();
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
         releaseWakeLock();
     }
 
-    // Google Translate Cloud API 呼び出し
     async function translateText(text) {
         const apiKey = apiKeyInput.value.trim();
         const targetLang = targetLangSelect.value;
 
-        if (!apiKey) {
-            return '[APIキー未入力] ' + text;
-        }
+        if (!apiKey) return '[APIキー未入力] ' + text;
 
         const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
 
@@ -280,10 +362,7 @@
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    q: text,
-                    target: targetLang
-                })
+                body: JSON.stringify({ q: text, target: targetLang })
             });
             const data = await response.json();
             if (data.data && data.data.translations.length > 0) {
@@ -291,20 +370,14 @@
             }
             return '[翻訳エラー]';
         } catch (error) {
-            console.error('Translation Error:', error);
             return '[通信エラー]';
         }
     }
 
-    // 画面スリープ防止処理
     async function requestWakeLock() {
         try {
-            if ('wakeLock' in navigator) {
-                wakeLock = await navigator.wakeLock.request('screen');
-            }
-        } catch (err) {
-            console.error(`${err.name}, ${err.message}`);
-        }
+            if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {}
     }
 
     function releaseWakeLock() {
