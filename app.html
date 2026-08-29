@@ -31,7 +31,6 @@
         .setting-group { display: flex; gap: 8px; }
         .setting-group > div { flex: 1; }
 
-        /* デバッグログ・音量メーター用のスタイル */
         .debug-box { height: 120px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; }
         .volume-bar-bg { width: 100%; height: 8px; background: #e5e5ea; border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
         .volume-bar-fill { height: 100%; width: 0%; background: #34c759; transition: width 0.1s ease; }
@@ -42,7 +41,7 @@
 <div class="container">
     <div class="header-title">
         <h2>リアルタイム講義翻訳</h2>
-        <span class="version-tag">v1.1 (Debug)</span>
+        <span class="version-tag">v1.3 (EN → JA)</span>
     </div>
     
     <div class="card">
@@ -117,7 +116,6 @@
         <div id="translatedText" class="speech-box translated"></div>
     </div>
 
-    <!-- デバッグ用通信ログ -->
     <div class="card">
         <label>システム・通信ログ (Debug Log)</label>
         <div id="debugLog" class="debug-box"></div>
@@ -129,17 +127,13 @@
     const STORAGE_G_KEY = 'google_translate_api_key';
 
     let socket = null;
-    let mediaRecorder = null;
     let mediaStream = null;
+    let audioContext = null;
+    let scriptProcessor = null;
     let keepAliveTimer = null;
     let isListening = false;
     let wakeLock = null;
     let availableVoices = [];
-    
-    // 音量メーター用
-    let audioContext = null;
-    let analyser = null;
-    let animFrameId = null;
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
@@ -174,7 +168,7 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        log("システム初期化完了 (v1.1)");
+        log("システム初期化完了 (v1.3 - EN to JA)");
         const savedDgKey = localStorage.getItem(STORAGE_DG_KEY);
         if (savedDgKey) {
             deepgramKeyInput.value = savedDgKey;
@@ -294,15 +288,12 @@
             return;
         }
 
-        log("マイク許可の取得中...");
+        log("マイク許可を取得中...");
         try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({ 
-                audio: { echoCancellation: true, noiseSuppression: true } 
-            });
-            log("マイク接続成功");
-            startVolumeMonitor(mediaStream);
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            log("マイク接続完了");
         } catch (e) {
-            log("マイクアクセス拒否エラー: " + e.message, 'error');
+            log("マイクアクセス拒否: " + e.message, 'error');
             errorLog.textContent = 'マイクのアクセスが拒否されました。';
             return;
         }
@@ -318,22 +309,21 @@
         const srcLang = sourceLangSelect.value;
         const model = srcLang === 'ja' ? 'general' : 'nova-2';
         
-        // パラメータ構成
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&punctuate=true&smart_formatting=true&interim_results=true`;
-        log(`Deepgram接続開始: model=${model}, lang=${srcLang}`);
+        const sampleRate = 16000;
+        const dgUrl = `wss://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&encoding=linear16&sample_rate=${sampleRate}&channels=1&punctuate=true&smart_formatting=true&interim_results=true`;
+        
+        log(`Deepgram接続開始: lang=${srcLang}, model=${model}`);
 
         try {
-            // トークン認証プロトコル
             socket = new WebSocket(dgUrl, ['token', dgKey]);
         } catch(e) {
             log("WebSocket生成例外: " + e.message, 'error');
-            errorLog.textContent = 'WebSocket作成エラー';
             stopTranslation();
             return;
         }
 
         socket.onopen = () => {
-            log("WebSocket接続確立 (OPEN)");
+            log("Deepgram WebSocket接続成功 (OPEN)");
             statusDiv.textContent = '音声認識中 (Deepgram)...';
             statusDiv.style.color = '#34c759';
 
@@ -343,16 +333,15 @@
                 }
             }, 5000);
 
-            startAudioRecording(mediaStream);
+            startAudioProcessing(mediaStream, sampleRate);
         };
 
         socket.onmessage = async (message) => {
             try {
                 const received = JSON.parse(message.data);
                 
-                // Deepgramからのエラーメッセージ
                 if (received.type === 'Error') {
-                    log(`Deepgramエラー返答: ${received.message}`, 'error');
+                    log(`Deepgramエラー: ${received.message}`, 'error');
                     return;
                 }
 
@@ -360,29 +349,30 @@
                 const isFinal = received.is_final;
 
                 if (transcript && transcript.length > 0) {
-                    log(`受信 (${isFinal ? '確定' : '途中'}): "${transcript}"`);
+                    log(`認識 (${isFinal ? '確定' : '途中'}): "${transcript}"`);
                 }
 
+                // 1文として判定が確定（is_final）したタイミングでGoogle APIへ渡す
                 if (isFinal && transcript && transcript.trim().length > 0) {
                     appendMessage(originalBox, transcript);
-                    log(`Google翻訳へ送信中...`);
+                    log(`Google翻訳送信中...`);
                     const translated = await translateText(transcript);
                     log(`翻訳結果: "${translated}"`);
                     appendMessage(translatedBox, translated);
                     speakText(translated);
                 }
             } catch (e) {
-                log("JSONパースエラー: " + e.message, 'warn');
+                log("レスポンス解析エラー: " + e.message, 'warn');
             }
         };
 
         socket.onerror = (error) => {
-            log("WebSocket Errorが発生しました", 'error');
+            log("WebSocket通信エラー発生", 'error');
             errorLog.textContent = '接続エラーが発生しました。';
         };
 
         socket.onclose = (event) => {
-            log(`WebSocket切断: Code=${event.code}, Reason="${event.reason}"`, 'warn');
+            log(`切断されました: Code=${event.code}, Reason="${event.reason}"`, 'warn');
             if (isListening) {
                 errorLog.textContent = `接続が切断されました (Code: ${event.code})`;
                 stopTranslation();
@@ -390,56 +380,66 @@
         };
     }
 
-    function startVolumeMonitor(stream) {
+    function startAudioProcessing(stream, targetSampleRate) {
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        analyser = audioContext.createAnalyser();
         const source = audioContext.createMediaStreamSource(stream);
-        source.connect(analyser);
-        analyser.fftSize = 256;
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
-        function updateVolume() {
-            if (!isListening) return;
-            analyser.getByteFrequencyData(dataArray);
+        let packetCount = 0;
+
+        scriptProcessor.onaudioprocess = (e) => {
+            if (!isListening || !socket || socket.readyState !== WebSocket.OPEN) return;
+
+            const inputBuffer = e.inputBuffer.getChannelData(0);
+            
+            // 音量メーター表示
             let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-            let average = sum / dataArray.length;
-            let val = Math.min(100, Math.floor((average / 128) * 100));
-            volumeFill.style.width = val + '%';
-            animFrameId = requestAnimationFrame(updateVolume);
-        }
-        updateVolume();
+            for (let i = 0; i < inputBuffer.length; i++) {
+                sum += Math.abs(inputBuffer[i]);
+            }
+            let avg = sum / inputBuffer.length;
+            volumeFill.style.width = Math.min(100, Math.floor(avg * 400)) + '%';
+
+            // 生PCMデータ送信
+            const pcm16Data = downsampleBuffer(inputBuffer, audioContext.sampleRate, targetSampleRate);
+            socket.send(pcm16Data);
+            
+            packetCount++;
+            if (packetCount % 20 === 0) {
+                log(`生PCMデータ送信中 (${packetCount}パケット完了)`);
+            }
+        };
+
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(audioContext.destination);
     }
 
-    function startAudioRecording(stream) {
-        let mimeType = '';
-        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-            mimeType = 'audio/webm;codecs=opus';
-        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-            mimeType = 'audio/webm';
-        }
-
-        log(`MediaRecorder開始: mimeType="${mimeType || 'デフォルト'}"`);
-
-        try {
-            mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-        } catch(e) {
-            log("MediaRecorder初期化失敗: " + e.message, 'error');
-            return;
-        }
-
-        let sendCount = 0;
-        mediaRecorder.addEventListener('dataavailable', (event) => {
-            if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(event.data);
-                sendCount++;
-                if (sendCount % 20 === 0) {
-                    log(`音声データパケット送信中 (${sendCount}個完了)`);
-                }
+    function downsampleBuffer(buffer, sampleRate, outSampleRate) {
+        if (outSampleRate === sampleRate) {
+            const result = new Int16Array(buffer.length);
+            for (let i = 0; i < buffer.length; i++) {
+                result[i] = Math.max(-1, Math.min(1, buffer[i])) * 0x7FFF;
             }
-        });
-
-        mediaRecorder.start(250);
+            return result.buffer;
+        }
+        const sampleRateRatio = sampleRate / outSampleRate;
+        const newLength = Math.round(buffer.length / sampleRateRatio);
+        const result = new Int16Array(newLength);
+        let offsetResult = 0;
+        let offsetBuffer = 0;
+        while (offsetResult < result.length) {
+            const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
+            let accum = 0, count = 0;
+            for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+                accum += buffer[i];
+                count++;
+            }
+            const arg = count > 0 ? accum / count : 0;
+            result[offsetResult] = Math.max(-1, Math.min(1, arg)) * 0x7FFF;
+            offsetResult++;
+            offsetBuffer = nextOffsetBuffer;
+        }
+        return result.buffer;
     }
 
     function stopTranslation() {
@@ -451,13 +451,8 @@
         volumeFill.style.width = '0%';
 
         if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
-        if (animFrameId) { cancelAnimationFrame(animFrameId); }
+        if (scriptProcessor) { scriptProcessor.disconnect(); scriptProcessor = null; }
         if (audioContext) { audioContext.close(); audioContext = null; }
-
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-            mediaRecorder = null;
-        }
 
         if (mediaStream) {
             mediaStream.getTracks().forEach(track => track.stop());
@@ -474,7 +469,7 @@
         }
 
         releaseWakeLock();
-        log("処理停止完了");
+        log("処理を安全に停止しました");
     }
 
     async function translateText(text) {
@@ -495,10 +490,10 @@
             if (data.data && data.data.translations.length > 0) {
                 return data.data.translations[0].translatedText;
             }
-            log("Google翻訳レスポンスエラー: " + JSON.stringify(data), 'error');
+            log("Google APIレスポンスエラー: " + JSON.stringify(data), 'error');
             return '[翻訳エラー]';
         } catch (error) {
-            log("Google翻訳通信エラー: " + error.message, 'error');
+            log("Google API通信エラー: " + error.message, 'error');
             return '[通信エラー]';
         }
     }
