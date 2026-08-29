@@ -26,6 +26,8 @@
         .speech-box { height: 180px; overflow-y: auto; border: 1px solid #e5e5ea; border-radius: 8px; padding: 12px; background: #fafafa; font-size: 0.95rem; line-height: 1.5; }
         .translated { color: #0071e3; font-weight: 500; }
         .error-msg { color: #ff3b30; font-size: 0.85rem; text-align: center; margin-top: 4px; }
+        .setting-group { display: flex; gap: 8px; }
+        .setting-group > div { flex: 1; }
     </style>
 </head>
 <body>
@@ -48,15 +50,26 @@
         </div>
         <div id="saveGHint" class="saved-hint">✓ ブラウザに保存されています</div>
         
-        <label for="targetLang">翻訳先言語</label>
-        <select id="targetLang">
-            <option value="ja" selected>日本語 (Japanese)</option>
-            <option value="en">英語 (English)</option>
-        </select>
+        <div class="setting-group">
+            <div>
+                <label for="sourceLang">話し手の言語 (音声入力)</label>
+                <select id="sourceLang">
+                    <option value="en" selected>英語 (English)</option>
+                    <option value="ja">日本語 (Japanese)</option>
+                </select>
+            </div>
+            <div>
+                <label for="targetLang">翻訳先の言語</label>
+                <select id="targetLang">
+                    <option value="ja" selected>日本語 (Japanese)</option>
+                    <option value="en">英語 (English)</option>
+                </select>
+            </div>
+        </div>
 
         <div class="tts-config">
             <div class="tts-row">
-                <label for="ttsEnable">🎧 和訳の音声読み上げ</label>
+                <label for="ttsEnable">🎧 翻訳音声の読み上げ</label>
                 <input type="checkbox" id="ttsEnable" checked style="width: auto; margin-bottom: 0;">
             </div>
             <label for="ttsVoiceSelect" style="font-size:0.75rem;">読み上げ音声エンジン</label>
@@ -80,12 +93,12 @@
     </div>
 
     <div class="card">
-        <label>認識された音声 (Deepgram 英文)</label>
+        <label>認識された音声 (Deepgram 原文)</label>
         <div id="originalText" class="speech-box"></div>
     </div>
 
     <div class="card">
-        <label>リアルタイム翻訳結果 (Google 和訳)</label>
+        <label>リアルタイム翻訳結果 (Google 翻訳)</label>
         <div id="translatedText" class="speech-box translated"></div>
     </div>
 </div>
@@ -100,7 +113,7 @@
     let keepAliveTimer = null;
     let isListening = false;
     let wakeLock = null;
-    let availableJaVoices = [];
+    let availableVoices = [];
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
@@ -115,6 +128,7 @@
     const saveDgHint = document.getElementById('saveDgHint');
     const saveGHint = document.getElementById('saveGHint');
 
+    const sourceLangSelect = document.getElementById('sourceLang');
     const targetLangSelect = document.getElementById('targetLang');
     const ttsEnable = document.getElementById('ttsEnable');
     const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
@@ -173,11 +187,13 @@
         if (!('speechSynthesis' in window)) return;
 
         function populateVoices() {
-            const voices = window.speechSynthesis.getVoices();
-            availableJaVoices = voices.filter(v => v.lang.startsWith('ja'));
+            availableVoices = window.speechSynthesis.getVoices();
             ttsVoiceSelect.innerHTML = '';
 
-            if (availableJaVoices.length === 0) {
+            const targetLang = targetLangSelect.value;
+            const filteredVoices = availableVoices.filter(v => v.lang.startsWith(targetLang));
+
+            if (filteredVoices.length === 0) {
                 const opt = document.createElement('option');
                 opt.value = "";
                 opt.innerText = "標準音声（自動選択）";
@@ -185,9 +201,9 @@
                 return;
             }
 
-            availableJaVoices.forEach((voice, index) => {
+            filteredVoices.forEach((voice) => {
                 const opt = document.createElement('option');
-                opt.value = index;
+                opt.value = voice.name;
                 opt.innerText = `${voice.name} (${voice.lang})`;
                 ttsVoiceSelect.appendChild(opt);
             });
@@ -197,19 +213,22 @@
         if (speechSynthesis.onvoiceschanged !== undefined) {
             speechSynthesis.onvoiceschanged = populateVoices;
         }
+        targetLangSelect.addEventListener('change', populateVoices);
     }
 
-    function speakJapaneseText(text) {
+    function speakText(text) {
         if (!ttsEnable.checked || !text || !('speechSynthesis' in window)) return;
 
         window.speechSynthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'ja-JP';
+        const targetLang = targetLangSelect.value;
+        utterance.lang = targetLang === 'ja' ? 'ja-JP' : 'en-US';
 
-        const selectedIndex = parseInt(ttsVoiceSelect.value, 10);
-        if (!isNaN(selectedIndex) && availableJaVoices[selectedIndex]) {
-            utterance.voice = availableJaVoices[selectedIndex];
+        const selectedVoiceName = ttsVoiceSelect.value;
+        if (selectedVoiceName) {
+            const voiceObj = availableVoices.find(v => v.name === selectedVoiceName);
+            if (voiceObj) utterance.voice = voiceObj;
         }
 
         utterance.rate = parseFloat(ttsRate.value) || 1.2;
@@ -237,7 +256,13 @@
         }
 
         try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                } 
+            });
         } catch (e) {
             errorLog.textContent = 'マイクのアクセスが拒否されました。';
             return;
@@ -251,8 +276,10 @@
 
         requestWakeLock();
 
-        // 1. サブプロトコルヘッダーで認証トークンを安全に転送
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&smart_formatting=true`;
+        const srcLang = sourceLangSelect.value;
+        // 日本語モデル(ja)と英語モデル(en)で切り替え
+        const model = srcLang === 'ja' ? 'general' : 'nova-2';
+        const dgUrl = `wss://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&punctuate=true&smart_formatting=true&interim_results=true`;
 
         try {
             socket = new WebSocket(dgUrl, ['token', dgKey]);
@@ -272,7 +299,6 @@
                 }
             }, 5000);
 
-            // 2. MediaRecorderを用いた高信頼性の音声ストリーミング処理
             startAudioRecording(mediaStream);
         };
 
@@ -281,11 +307,12 @@
                 const received = JSON.parse(message.data);
                 const transcript = received.channel?.alternatives[0]?.transcript;
 
+                // 確定したテキスト(is_final)の場合のみ翻訳処理を実行
                 if (received.is_final && transcript && transcript.trim().length > 0) {
                     appendMessage(originalBox, transcript);
                     const translated = await translateText(transcript);
                     appendMessage(translatedBox, translated);
-                    speakJapaneseText(translated);
+                    speakText(translated);
                 }
             } catch (e) {
                 console.error("Parse error:", e);
@@ -294,22 +321,28 @@
 
         socket.onerror = (error) => {
             console.error('Deepgram WebSocket Error:', error);
-            errorLog.textContent = 'Deepgramとの接続でエラーが発生しました。APIキーを確認してください。';
+            errorLog.textContent = '接続エラーが発生しました。';
         };
 
         socket.onclose = (event) => {
             if (isListening) {
                 console.log('Closed code:', event.code, 'reason:', event.reason);
-                errorLog.textContent = `接続切断 (Code: ${event.code}) - APIキーか設定を確認してください。`;
+                errorLog.textContent = `接続が切断されました (Code: ${event.code})。`;
                 stopTranslation();
             }
         };
     }
 
     function startAudioRecording(stream) {
-        // ブラウザがサポートする適切なMIMEタイプを判別
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
-        mediaRecorder = new MediaRecorder(stream, { mimeType });
+        // 対応しているMIMEタイプを安全に選択
+        let options = {};
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            options = { mimeType: 'audio/webm;codecs=opus' };
+        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+            options = { mimeType: 'audio/ogg;codecs=opus' };
+        }
+
+        mediaRecorder = new MediaRecorder(stream, options);
 
         mediaRecorder.addEventListener('dataavailable', (event) => {
             if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
@@ -317,7 +350,7 @@
             }
         });
 
-        // 250ms毎に音声データチャンクをパケット化して送信
+        // 250ms毎に音声パケットを送信
         mediaRecorder.start(250);
     }
 
