@@ -137,7 +137,7 @@
     });
 
     deepgramKeyInput.addEventListener('input', () => {
-        const val = deepgramKeyInput.value.trim();
+        const val = deepgramKeyInput.value.trim().replace(/\s+/g, '');
         if (val) {
             localStorage.setItem(STORAGE_DG_KEY, val);
             saveDgHint.style.display = 'block';
@@ -148,7 +148,7 @@
     });
 
     googleKeyInput.addEventListener('input', () => {
-        const val = googleKeyInput.value.trim();
+        const val = googleKeyInput.value.trim().replace(/\s+/g, '');
         if (val) {
             localStorage.setItem(STORAGE_G_KEY, val);
             saveGHint.style.display = 'block';
@@ -229,8 +229,8 @@
 
     async function startTranslation() {
         errorLog.textContent = '';
-        const dgKey = deepgramKeyInput.value.trim();
-        const gKey = googleKeyInput.value.trim();
+        const dgKey = deepgramKeyInput.value.trim().replace(/\s+/g, '');
+        const gKey = googleKeyInput.value.trim().replace(/\s+/g, '');
 
         if (!dgKey || !gKey) {
             alert('Deepgram API Key と Google Translate API Key の両方を入力してください。');
@@ -244,6 +244,12 @@
             return;
         }
 
+        // ブラウザの自動再生ポリシー対策：ユーザー操作（クリック時）にAudioContextを作成・リジューム
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
+
         isListening = true;
         toggleBtn.textContent = '翻訳を停止する';
         toggleBtn.classList.add('stop');
@@ -252,8 +258,8 @@
 
         requestWakeLock();
 
-        // 1. URLパラメータで token, encoding (linear16), sample_rate (16000) を明示指定
-        const dgUrl = `wss://api.deepgram.com/v1/listen?token=${dgKey}&model=nova-2&language=en&encoding=linear16&sample_rate=16000&channels=1&punctuate=true&smart_formatting=true`;
+        // クエリパラメータの安全なビルドとパラメータ最小化（1006エラー防止）
+        const dgUrl = `wss://api.deepgram.com/v1/listen?token=${encodeURIComponent(dgKey)}&encoding=linear16&sample_rate=16000&channels=1&punctuate=true`;
 
         try {
             socket = new WebSocket(dgUrl);
@@ -267,14 +273,12 @@
             statusDiv.textContent = '音声認識中 (Deepgram)...';
             statusDiv.style.color = '#34c759';
 
-            // 2. 講義中の無音切断を防ぐ KeepAlive (5秒おき)
             keepAliveTimer = setInterval(() => {
                 if (socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(JSON.stringify({ type: "KeepAlive" }));
                 }
             }, 5000);
 
-            // 3. AudioContextを用いた 16kHz Raw PCM (linear16) ストリーミング処理
             startAudioProcessing(mediaStream);
         };
 
@@ -296,24 +300,20 @@
 
         socket.onerror = (error) => {
             console.error('Deepgram WebSocket Error:', error);
-            errorLog.textContent = '接続エラーが発生しました。API Keyを確認してください。';
         };
 
         socket.onclose = (event) => {
             if (isListening) {
-                if (event.code === 1006) {
-                    errorLog.textContent = '接続エラー (Code: 1006): API Keyが無効、または設定エラーです。';
-                } else if (event.code !== 1000) {
-                    errorLog.textContent = `接続切断 (Code: ${event.code})`;
-                }
+                console.log('Closed code:', event.code, 'reason:', event.reason);
+                errorLog.textContent = `接続切断 (Code: ${event.code}) - 送信形式または通信の切断です。`;
                 stopTranslation();
             }
         };
     }
 
-    // マイク音声を16kHz Int16 (linear16) バイナリにダウンサンプリングしてDeepgramに送る関数
     function startAudioProcessing(stream) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        if (!audioContext) return;
+
         const source = audioContext.createMediaStreamSource(stream);
         processor = audioContext.createScriptProcessor(4096, 1, 1);
 
@@ -373,7 +373,7 @@
     }
 
     async function translateText(text) {
-        const apiKey = googleKeyInput.value.trim();
+        const apiKey = googleKeyInput.value.trim().replace(/\s+/g, '');
         const targetLang = targetLangSelect.value;
 
         if (!apiKey) return '[APIキー未入力] ' + text;
