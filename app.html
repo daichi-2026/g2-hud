@@ -5,126 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>リアルタイム講義翻訳 (Deepgram版)</title>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            margin: 0;
-            padding: 16px;
-            background-color: #f5f5f7;
-            color: #1d1d1f;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-        }
-        .card {
-            background: #ffffff;
-            border-radius: 12px;
-            padding: 16px;
-            margin-bottom: 16px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        }
-        label {
-            font-size: 0.85rem;
-            font-weight: bold;
-            color: #6e6e73;
-            display: block;
-            margin-bottom: 4px;
-        }
-        input, select, button {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 12px;
-            border: 1px solid #ccc;
-            border-radius: 8px;
-            box-sizing: border-box;
-            font-size: 1rem;
-        }
-        .key-container {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        .key-container input {
-            flex: 1;
-            margin-bottom: 0;
-        }
-        .key-container button {
-            width: auto;
-            white-space: nowrap;
-            background-color: #86868b;
-            margin-bottom: 0;
-        }
-        .saved-hint {
-            font-size: 0.75rem;
-            color: #34c759;
-            margin-top: -8px;
-            margin-bottom: 12px;
-            display: none;
-        }
-        .tts-config {
-            background: #f2f2f7;
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 12px;
-        }
-        .tts-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        .tts-row label {
-            margin-bottom: 0;
-        }
-        .range-container {
-            display: flex;
-            gap: 12px;
-        }
-        .range-item {
-            flex: 1;
-        }
-        .range-item label {
-            font-size: 0.75rem;
-        }
-        button.action-btn {
-            background-color: #0071e3;
-            color: white;
-            font-weight: bold;
-            border: none;
-            cursor: pointer;
-            transition: background 0.2s;
-            margin-top: 8px;
-        }
-        button.action-btn.stop {
-            background-color: #ff3b30;
-        }
-        #status {
-            font-size: 0.9rem;
-            font-weight: bold;
-            color: #86868b;
-            text-align: center;
-            margin-bottom: 12px;
-        }
-        .speech-box {
-            height: 180px;
-            overflow-y: auto;
-            border: 1px solid #e5e5ea;
-            border-radius: 8px;
-            padding: 12px;
-            background: #fafafa;
-            font-size: 0.95rem;
-            line-height: 1.5;
-        }
-        .translated {
-            color: #0071e3;
-            font-weight: 500;
-        }
-        .error-msg {
-            color: #ff3b30;
-            font-size: 0.85rem;
-            text-align: center;
-            margin-top: 4px;
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background-color: #f5f5f7; color: #1d1d1f; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .card { background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        label { font-size: 0.85rem; font-weight: bold; color: #6e6e73; display: block; margin-bottom: 4px; }
+        input, select, button { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
+        .key-container { display: flex; gap: 8px; margin-bottom: 12px; }
+        .key-container input { flex: 1; margin-bottom: 0; }
+        .key-container button { width: auto; white-space: nowrap; background-color: #86868b; margin-bottom: 0; }
+        .saved-hint { font-size: 0.75rem; color: #34c759; margin-top: -8px; margin-bottom: 12px; display: none; }
+        .tts-config { background: #f2f2f7; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+        .tts-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .tts-row label { margin-bottom: 0; }
+        .range-container { display: flex; gap: 12px; }
+        .range-item { flex: 1; }
+        .range-item label { font-size: 0.75rem; }
+        button.action-btn { background-color: #0071e3; color: white; font-weight: bold; border: none; cursor: pointer; transition: background 0.2s; margin-top: 8px; }
+        button.action-btn.stop { background-color: #ff3b30; }
+        #status { font-size: 0.9rem; font-weight: bold; color: #86868b; text-align: center; margin-bottom: 12px; }
+        .speech-box { height: 180px; overflow-y: auto; border: 1px solid #e5e5ea; border-radius: 8px; padding: 12px; background: #fafafa; font-size: 0.95rem; line-height: 1.5; }
+        .translated { color: #0071e3; font-weight: 500; }
+        .error-msg { color: #ff3b30; font-size: 0.85rem; text-align: center; margin-top: 4px; }
     </style>
 </head>
 <body>
@@ -133,7 +34,6 @@
     <h2>リアルタイム講義翻訳 (Deepgram)</h2>
     
     <div class="card">
-        <!-- Deepgram Key -->
         <label for="deepgramKey">Deepgram API Key</label>
         <div class="key-container">
             <input type="password" id="deepgramKey" placeholder="Deepgram API Key">
@@ -141,7 +41,6 @@
         </div>
         <div id="saveDgHint" class="saved-hint">✓ ブラウザに保存されています</div>
 
-        <!-- Google Key -->
         <label for="googleKey">Google Translate API Key</label>
         <div class="key-container">
             <input type="password" id="googleKey" placeholder="Google Translate API Key">
@@ -155,7 +54,6 @@
             <option value="en">英語 (English)</option>
         </select>
 
-        <!-- 音声読み上げ（TTS）設定 -->
         <div class="tts-config">
             <div class="tts-row">
                 <label for="ttsEnable">🎧 和訳の音声読み上げ</label>
@@ -197,8 +95,10 @@
     const STORAGE_G_KEY = 'google_translate_api_key';
 
     let socket = null;
-    let mediaRecorder = null;
-    let audioStream = null;
+    let audioContext = null;
+    let mediaStream = null;
+    let processor = null;
+    let keepAliveTimer = null;
     let isListening = false;
     let wakeLock = null;
     let availableJaVoices = [];
@@ -246,6 +146,7 @@
             saveDgHint.style.display = 'none';
         }
     });
+
     googleKeyInput.addEventListener('input', () => {
         const val = googleKeyInput.value.trim();
         if (val) {
@@ -262,6 +163,7 @@
         localStorage.removeItem(STORAGE_DG_KEY);
         saveDgHint.style.display = 'none';
     });
+
     clearGkeyBtn.addEventListener('click', () => {
         googleKeyInput.value = '';
         localStorage.removeItem(STORAGE_G_KEY);
@@ -336,7 +238,7 @@
         }
 
         try {
-            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (e) {
             errorLog.textContent = 'マイクのアクセスが拒否されました。';
             return;
@@ -350,11 +252,11 @@
 
         requestWakeLock();
 
-        // 接続プロトコルを 'token' + API Key に修正
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&smart_formatting=true`;
+        // 1. URLパラメータで token, encoding (linear16), sample_rate (16000) を明示指定
+        const dgUrl = `wss://api.deepgram.com/v1/listen?token=${dgKey}&model=nova-2&language=en&encoding=linear16&sample_rate=16000&channels=1&punctuate=true&smart_formatting=true`;
 
         try {
-            socket = new WebSocket(dgUrl, ['token', dgKey]);
+            socket = new WebSocket(dgUrl);
         } catch(e) {
             errorLog.textContent = 'WebSocket作成エラー';
             stopTranslation();
@@ -365,25 +267,15 @@
             statusDiv.textContent = '音声認識中 (Deepgram)...';
             statusDiv.style.color = '#34c759';
 
-            let mimeType = '';
-            if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-                mimeType = 'audio/webm;codecs=opus';
-            } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-                mimeType = 'audio/webm';
-            }
-
-            try {
-                mediaRecorder = mimeType ? new MediaRecorder(audioStream, { mimeType }) : new MediaRecorder(audioStream);
-            } catch (e) {
-                mediaRecorder = new MediaRecorder(audioStream);
-            }
-
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(event.data);
+            // 2. 講義中の無音切断を防ぐ KeepAlive (5秒おき)
+            keepAliveTimer = setInterval(() => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: "KeepAlive" }));
                 }
-            };
-            mediaRecorder.start(250);
+            }, 5000);
+
+            // 3. AudioContextを用いた 16kHz Raw PCM (linear16) ストリーミング処理
+            startAudioProcessing(mediaStream);
         };
 
         socket.onmessage = async (message) => {
@@ -404,19 +296,41 @@
 
         socket.onerror = (error) => {
             console.error('Deepgram WebSocket Error:', error);
-            errorLog.textContent = '接続エラーが発生しました。キーを確認してください。';
+            errorLog.textContent = '接続エラーが発生しました。API Keyを確認してください。';
         };
 
         socket.onclose = (event) => {
             if (isListening) {
                 if (event.code === 1006) {
-                    errorLog.textContent = '接続エラー (Code: 1006): API Keyが無効、または期限切れの可能性があります。';
+                    errorLog.textContent = '接続エラー (Code: 1006): API Keyが無効、または設定エラーです。';
                 } else if (event.code !== 1000) {
                     errorLog.textContent = `接続切断 (Code: ${event.code})`;
                 }
                 stopTranslation();
             }
         };
+    }
+
+    // マイク音声を16kHz Int16 (linear16) バイナリにダウンサンプリングしてDeepgramに送る関数
+    function startAudioProcessing(stream) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(stream);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (e) => {
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcm16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+                let s = Math.max(-1, Math.min(1, inputData[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            socket.send(pcm16.buffer);
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
     }
 
     function stopTranslation() {
@@ -426,15 +340,31 @@
         statusDiv.textContent = '停止中';
         statusDiv.style.color = '#86868b';
 
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            try { mediaRecorder.stop(); } catch(e){}
+        if (keepAliveTimer) {
+            clearInterval(keepAliveTimer);
+            keepAliveTimer = null;
         }
-        if (audioStream) {
-            audioStream.getTracks().forEach(track => track.stop());
+
+        if (processor) {
+            processor.disconnect();
+            processor = null;
         }
+
+        if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+        }
+
+        if (mediaStream) {
+            mediaStream.getTracks().forEach(track => track.stop());
+            mediaStream = null;
+        }
+
         if (socket) {
             try { socket.close(); } catch(e){}
+            socket = null;
         }
+
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
         }
