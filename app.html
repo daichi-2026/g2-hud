@@ -214,7 +214,6 @@
     const ttsRate = document.getElementById('ttsRate');
     const ttsPitch = document.getElementById('ttsPitch');
 
-    // 初期化：APIキー復元 & 音声エンジン取得
     window.addEventListener('DOMContentLoaded', () => {
         const savedDgKey = localStorage.getItem(STORAGE_DG_KEY);
         if (savedDgKey) {
@@ -229,7 +228,6 @@
         initSpeechSynthesis();
     });
 
-    // キー保存イベント
     deepgramKeyInput.addEventListener('input', () => {
         const val = deepgramKeyInput.value.trim();
         if (val) {
@@ -262,7 +260,6 @@
         saveGHint.style.display = 'none';
     });
 
-    // TTS 初期化
     function initSpeechSynthesis() {
         if (!('speechSynthesis' in window)) return;
 
@@ -293,7 +290,6 @@
         }
     }
 
-    // 和訳音声読み上げ
     function speakJapaneseText(text) {
         if (!ttsEnable.checked || !text || !('speechSynthesis' in window)) return;
 
@@ -313,7 +309,6 @@
         window.speechSynthesis.speak(utterance);
     }
 
-    // トグルボタン処理
     toggleBtn.addEventListener('click', async () => {
         if (!isListening) {
             startTranslation();
@@ -346,18 +341,27 @@
 
         requestWakeLock();
 
-        // Deepgram WebSocket 接続 (Nova-2モデル / 英語)
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&interim_results=false`;
+        // ブラウザの対応MIMEタイプを自動検出
+        let mimeType = 'audio/webm';
+        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+            mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+            mimeType = 'audio/mp4';
+        }
+
+        // Deepgram URL（設定を安全なパラメータ構成に修正）
+        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&smart_formatting=true`;
+        
+        // Deepgram接続（Tokenプロトコル渡し）
         socket = new WebSocket(dgUrl, ['token', dgKey]);
 
         socket.onopen = () => {
             statusDiv.textContent = '音声認識中 (Deepgram)...';
             statusDiv.style.color = '#34c759';
 
-            // マイク音声をストリーミング送信 (250ms単位)
-            mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+            mediaRecorder = new MediaRecorder(audioStream, { mimeType: mimeType });
             mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+                if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
                     socket.send(event.data);
                 }
             };
@@ -365,24 +369,30 @@
         };
 
         socket.onmessage = async (message) => {
-            const received = JSON.parse(message.data);
-            const transcript = received.channel?.alternatives[0]?.transcript;
+            try {
+                const received = JSON.parse(message.data);
+                // 確定した認識結果（is_final）かつ空でない場合のみ処理
+                const isFinal = received.is_final;
+                const transcript = received.channel?.alternatives[0]?.transcript;
 
-            if (transcript && transcript.trim().length > 0) {
-                appendMessage(originalBox, transcript);
-                const translated = await translateText(transcript);
-                appendMessage(translatedBox, translated);
-                speakJapaneseText(translated);
+                if (isFinal && transcript && transcript.trim().length > 0) {
+                    appendMessage(originalBox, transcript);
+                    const translated = await translateText(transcript);
+                    appendMessage(translatedBox, translated);
+                    speakJapaneseText(translated);
+                }
+            } catch (e) {
+                console.error("Parse error:", e);
             }
         };
 
         socket.onerror = (error) => {
             console.error('Deepgram WebSocket Error:', error);
-            statusDiv.textContent = 'エラーが発生しました';
+            statusDiv.textContent = 'エラーが発生しました（キーをご確認ください）';
             statusDiv.style.color = '#ff3b30';
         };
 
-        socket.onclose = () => {
+        socket.onclose = (event) => {
             if (isListening) {
                 stopTranslation();
             }
@@ -412,7 +422,6 @@
         releaseWakeLock();
     }
 
-    // Google Translate API
     async function translateText(text) {
         const apiKey = googleKeyInput.value.trim();
         const targetLang = targetLangSelect.value;
