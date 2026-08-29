@@ -8,6 +8,8 @@
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background-color: #f5f5f7; color: #1d1d1f; }
         .container { max-width: 600px; margin: 0 auto; }
         .card { background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .header-title { display: flex; align-items: center; justify-content: space-between; }
+        .version-tag { background: #0071e3; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
         label { font-size: 0.85rem; font-weight: bold; color: #6e6e73; display: block; margin-bottom: 4px; }
         input, select, button { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
         .key-container { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -23,17 +25,25 @@
         button.action-btn { background-color: #0071e3; color: white; font-weight: bold; border: none; cursor: pointer; transition: background 0.2s; margin-top: 8px; }
         button.action-btn.stop { background-color: #ff3b30; }
         #status { font-size: 0.9rem; font-weight: bold; color: #86868b; text-align: center; margin-bottom: 12px; }
-        .speech-box { height: 180px; overflow-y: auto; border: 1px solid #e5e5ea; border-radius: 8px; padding: 12px; background: #fafafa; font-size: 0.95rem; line-height: 1.5; }
+        .speech-box { height: 160px; overflow-y: auto; border: 1px solid #e5e5ea; border-radius: 8px; padding: 12px; background: #fafafa; font-size: 0.95rem; line-height: 1.5; }
         .translated { color: #0071e3; font-weight: 500; }
         .error-msg { color: #ff3b30; font-size: 0.85rem; text-align: center; margin-top: 4px; }
         .setting-group { display: flex; gap: 8px; }
         .setting-group > div { flex: 1; }
+
+        /* デバッグログ・音量メーター用のスタイル */
+        .debug-box { height: 120px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; }
+        .volume-bar-bg { width: 100%; height: 8px; background: #e5e5ea; border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
+        .volume-bar-fill { height: 100%; width: 0%; background: #34c759; transition: width 0.1s ease; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>リアルタイム講義翻訳 (Deepgram)</h2>
+    <div class="header-title">
+        <h2>リアルタイム講義翻訳</h2>
+        <span class="version-tag">v1.1 (Debug)</span>
+    </div>
     
     <div class="card">
         <label for="deepgramKey">Deepgram API Key</label>
@@ -87,6 +97,11 @@
             </div>
         </div>
 
+        <label>マイク入力音量</label>
+        <div class="volume-bar-bg">
+            <div id="volumeFill" class="volume-bar-fill"></div>
+        </div>
+
         <button id="toggleBtn" class="action-btn">翻訳を開始する</button>
         <div id="status">停止中</div>
         <div id="errorLog" class="error-msg"></div>
@@ -101,6 +116,12 @@
         <label>リアルタイム翻訳結果 (Google 翻訳)</label>
         <div id="translatedText" class="speech-box translated"></div>
     </div>
+
+    <!-- デバッグ用通信ログ -->
+    <div class="card">
+        <label>システム・通信ログ (Debug Log)</label>
+        <div id="debugLog" class="debug-box"></div>
+    </div>
 </div>
 
 <script>
@@ -114,10 +135,17 @@
     let isListening = false;
     let wakeLock = null;
     let availableVoices = [];
+    
+    // 音量メーター用
+    let audioContext = null;
+    let analyser = null;
+    let animFrameId = null;
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
     const errorLog = document.getElementById('errorLog');
+    const debugLog = document.getElementById('debugLog');
+    const volumeFill = document.getElementById('volumeFill');
     const originalBox = document.getElementById('originalText');
     const translatedBox = document.getElementById('translatedText');
 
@@ -135,7 +163,18 @@
     const ttsRate = document.getElementById('ttsRate');
     const ttsPitch = document.getElementById('ttsPitch');
 
+    function log(msg, type = 'info') {
+        const time = new Date().toLocaleTimeString();
+        const p = document.createElement('div');
+        p.textContent = `[${time}] ${msg}`;
+        if (type === 'error') p.style.color = '#ff453a';
+        if (type === 'warn') p.style.color = '#ffd60a';
+        debugLog.appendChild(p);
+        debugLog.scrollTop = debugLog.scrollHeight;
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
+        log("システム初期化完了 (v1.1)");
         const savedDgKey = localStorage.getItem(STORAGE_DG_KEY);
         if (savedDgKey) {
             deepgramKeyInput.value = savedDgKey;
@@ -255,15 +294,15 @@
             return;
         }
 
+        log("マイク許可の取得中...");
         try {
             mediaStream = await navigator.mediaDevices.getUserMedia({ 
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                } 
+                audio: { echoCancellation: true, noiseSuppression: true } 
             });
+            log("マイク接続成功");
+            startVolumeMonitor(mediaStream);
         } catch (e) {
+            log("マイクアクセス拒否エラー: " + e.message, 'error');
             errorLog.textContent = 'マイクのアクセスが拒否されました。';
             return;
         }
@@ -277,19 +316,24 @@
         requestWakeLock();
 
         const srcLang = sourceLangSelect.value;
-        // 日本語モデル(ja)と英語モデル(en)で切り替え
         const model = srcLang === 'ja' ? 'general' : 'nova-2';
+        
+        // パラメータ構成
         const dgUrl = `wss://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&punctuate=true&smart_formatting=true&interim_results=true`;
+        log(`Deepgram接続開始: model=${model}, lang=${srcLang}`);
 
         try {
+            // トークン認証プロトコル
             socket = new WebSocket(dgUrl, ['token', dgKey]);
         } catch(e) {
+            log("WebSocket生成例外: " + e.message, 'error');
             errorLog.textContent = 'WebSocket作成エラー';
             stopTranslation();
             return;
         }
 
         socket.onopen = () => {
+            log("WebSocket接続確立 (OPEN)");
             statusDiv.textContent = '音声認識中 (Deepgram)...';
             statusDiv.style.color = '#34c759';
 
@@ -305,52 +349,96 @@
         socket.onmessage = async (message) => {
             try {
                 const received = JSON.parse(message.data);
-                const transcript = received.channel?.alternatives[0]?.transcript;
+                
+                // Deepgramからのエラーメッセージ
+                if (received.type === 'Error') {
+                    log(`Deepgramエラー返答: ${received.message}`, 'error');
+                    return;
+                }
 
-                // 確定したテキスト(is_final)の場合のみ翻訳処理を実行
-                if (received.is_final && transcript && transcript.trim().length > 0) {
+                const transcript = received.channel?.alternatives[0]?.transcript;
+                const isFinal = received.is_final;
+
+                if (transcript && transcript.length > 0) {
+                    log(`受信 (${isFinal ? '確定' : '途中'}): "${transcript}"`);
+                }
+
+                if (isFinal && transcript && transcript.trim().length > 0) {
                     appendMessage(originalBox, transcript);
+                    log(`Google翻訳へ送信中...`);
                     const translated = await translateText(transcript);
+                    log(`翻訳結果: "${translated}"`);
                     appendMessage(translatedBox, translated);
                     speakText(translated);
                 }
             } catch (e) {
-                console.error("Parse error:", e);
+                log("JSONパースエラー: " + e.message, 'warn');
             }
         };
 
         socket.onerror = (error) => {
-            console.error('Deepgram WebSocket Error:', error);
+            log("WebSocket Errorが発生しました", 'error');
             errorLog.textContent = '接続エラーが発生しました。';
         };
 
         socket.onclose = (event) => {
+            log(`WebSocket切断: Code=${event.code}, Reason="${event.reason}"`, 'warn');
             if (isListening) {
-                console.log('Closed code:', event.code, 'reason:', event.reason);
-                errorLog.textContent = `接続が切断されました (Code: ${event.code})。`;
+                errorLog.textContent = `接続が切断されました (Code: ${event.code})`;
                 stopTranslation();
             }
         };
     }
 
+    function startVolumeMonitor(stream) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+        analyser.fftSize = 256;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        function updateVolume() {
+            if (!isListening) return;
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+            let average = sum / dataArray.length;
+            let val = Math.min(100, Math.floor((average / 128) * 100));
+            volumeFill.style.width = val + '%';
+            animFrameId = requestAnimationFrame(updateVolume);
+        }
+        updateVolume();
+    }
+
     function startAudioRecording(stream) {
-        // 対応しているMIMEタイプを安全に選択
-        let options = {};
+        let mimeType = '';
         if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-            options = { mimeType: 'audio/webm;codecs=opus' };
-        } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-            options = { mimeType: 'audio/ogg;codecs=opus' };
+            mimeType = 'audio/webm;codecs=opus';
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+            mimeType = 'audio/webm';
         }
 
-        mediaRecorder = new MediaRecorder(stream, options);
+        log(`MediaRecorder開始: mimeType="${mimeType || 'デフォルト'}"`);
 
+        try {
+            mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+        } catch(e) {
+            log("MediaRecorder初期化失敗: " + e.message, 'error');
+            return;
+        }
+
+        let sendCount = 0;
         mediaRecorder.addEventListener('dataavailable', (event) => {
             if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(event.data);
+                sendCount++;
+                if (sendCount % 20 === 0) {
+                    log(`音声データパケット送信中 (${sendCount}個完了)`);
+                }
             }
         });
 
-        // 250ms毎に音声パケットを送信
         mediaRecorder.start(250);
     }
 
@@ -360,11 +448,11 @@
         toggleBtn.classList.remove('stop');
         statusDiv.textContent = '停止中';
         statusDiv.style.color = '#86868b';
+        volumeFill.style.width = '0%';
 
-        if (keepAliveTimer) {
-            clearInterval(keepAliveTimer);
-            keepAliveTimer = null;
-        }
+        if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+        if (animFrameId) { cancelAnimationFrame(animFrameId); }
+        if (audioContext) { audioContext.close(); audioContext = null; }
 
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
             mediaRecorder.stop();
@@ -386,6 +474,7 @@
         }
 
         releaseWakeLock();
+        log("処理停止完了");
     }
 
     async function translateText(text) {
@@ -406,8 +495,10 @@
             if (data.data && data.data.translations.length > 0) {
                 return data.data.translations[0].translatedText;
             }
+            log("Google翻訳レスポンスエラー: " + JSON.stringify(data), 'error');
             return '[翻訳エラー]';
         } catch (error) {
+            log("Google翻訳通信エラー: " + error.message, 'error');
             return '[通信エラー]';
         }
     }
