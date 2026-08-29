@@ -95,9 +95,8 @@
     const STORAGE_G_KEY = 'google_translate_api_key';
 
     let socket = null;
-    let audioContext = null;
+    let mediaRecorder = null;
     let mediaStream = null;
-    let processor = null;
     let keepAliveTimer = null;
     let isListening = false;
     let wakeLock = null;
@@ -252,11 +251,10 @@
 
         requestWakeLock();
 
-        // Deepgramが必須とする標準パラメータ（model=nova-2, language=en等）を明示
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&encoding=linear16&sample_rate=16000&channels=1&punctuate=true&smart_formatting=true`;
+        // 1. サブプロトコルヘッダーで認証トークンを安全に転送
+        const dgUrl = `wss://api.deepgram.com/v1/listen?model=nova-2&language=en&punctuate=true&smart_formatting=true`;
 
         try {
-            // プロトコルヘッダー（Sec-WebSocket-Protocol）を使ってトークンを安全に渡す
             socket = new WebSocket(dgUrl, ['token', dgKey]);
         } catch(e) {
             errorLog.textContent = 'WebSocket作成エラー';
@@ -274,7 +272,8 @@
                 }
             }, 5000);
 
-            startAudioProcessing(mediaStream);
+            // 2. MediaRecorderを用いた高信頼性の音声ストリーミング処理
+            startAudioRecording(mediaStream);
         };
 
         socket.onmessage = async (message) => {
@@ -295,48 +294,31 @@
 
         socket.onerror = (error) => {
             console.error('Deepgram WebSocket Error:', error);
+            errorLog.textContent = 'Deepgramとの接続でエラーが発生しました。APIキーを確認してください。';
         };
 
         socket.onclose = (event) => {
             if (isListening) {
                 console.log('Closed code:', event.code, 'reason:', event.reason);
-                errorLog.textContent = `接続切断 (Code: ${event.code}) - パラメータ設定またはデータ形式のエラーです。`;
+                errorLog.textContent = `接続切断 (Code: ${event.code}) - APIキーか設定を確認してください。`;
                 stopTranslation();
             }
         };
     }
 
-    function startAudioProcessing(stream) {
-        // マイクの元のサンプルレートを維持しつつ16kHzへリサンプルして安定化
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        
-        const source = audioContext.createMediaStreamSource(stream);
-        processor = audioContext.createScriptProcessor(4096, 1, 1);
+    function startAudioRecording(stream) {
+        // ブラウザがサポートする適切なMIMEタイプを判別
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+        mediaRecorder = new MediaRecorder(stream, { mimeType });
 
-        const targetSampleRate = 16000;
-        const inputSampleRate = audioContext.sampleRate;
-
-        processor.onaudioprocess = (e) => {
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
-
-            const inputData = e.inputBuffer.getChannelData(0);
-            
-            // 簡易ダウンスピーチ（サンプリングレート変換）
-            const compression = inputSampleRate / targetSampleRate;
-            const outputLength = Math.floor(inputData.length / compression);
-            const pcm16 = new Int16Array(outputLength);
-
-            for (let i = 0; i < outputLength; i++) {
-                let index = Math.floor(i * compression);
-                let s = Math.max(-1, Math.min(1, inputData[index]));
-                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        mediaRecorder.addEventListener('dataavailable', (event) => {
+            if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(event.data);
             }
+        });
 
-            socket.send(pcm16.buffer);
-        };
-
-        source.connect(processor);
-        processor.connect(audioContext.destination);
+        // 250ms毎に音声データチャンクをパケット化して送信
+        mediaRecorder.start(250);
     }
 
     function stopTranslation() {
@@ -351,14 +333,9 @@
             keepAliveTimer = null;
         }
 
-        if (processor) {
-            processor.disconnect();
-            processor = null;
-        }
-
-        if (audioContext) {
-            audioContext.close();
-            audioContext = null;
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+            mediaRecorder = null;
         }
 
         if (mediaStream) {
