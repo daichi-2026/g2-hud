@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>リアルタイム講義翻訳 (G2 Deepgram移植版 v4.1)</title>
+    <title>リアルタイム講義翻訳 (高速ストリーミング版 v5.0)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background-color: #f5f5f7; color: #1d1d1f; }
         .container { max-width: 600px; margin: 0 auto; }
         .card { background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .header-title { display: flex; align-items: center; justify-content: space-between; }
-        .version-tag { background: #0071e3; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+        .version-tag { background: #34c759; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
         label { font-size: 0.85rem; font-weight: bold; color: #6e6e73; display: block; margin-bottom: 4px; }
         input, select, button { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
         .key-container { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -30,7 +30,8 @@
         .error-msg { color: #ff3b30; font-size: 0.85rem; text-align: center; margin-top: 4px; }
         .setting-group { display: flex; gap: 8px; }
         .setting-group > div { flex: 1; }
-        .debug-box { height: 160px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; word-break: break-all; }
+        .debug-box { height: 120px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; }
+        .interim { color: #86868b; font-style: italic; }
     </style>
 </head>
 <body>
@@ -38,17 +39,10 @@
 <div class="container">
     <div class="header-title">
         <h2>リアルタイム講義翻訳</h2>
-        <span class="version-tag">v4.1 Debug</span>
+        <span class="version-tag">v5.0 Stream</span>
     </div>
     
     <div class="card">
-        <label for="deepgramKey">Deepgram API Key</label>
-        <div class="key-container">
-            <input type="password" id="deepgramKey" placeholder="Deepgram Key">
-            <button id="clearDgKeyBtn" type="button">消去</button>
-        </div>
-        <div id="saveDgHint" class="saved-hint">✓ ブラウザに保存されています</div>
-
         <label for="googleKey">Google Translate API Key</label>
         <div class="key-container">
             <input type="password" id="googleKey" placeholder="Google Translate API Key">
@@ -60,8 +54,8 @@
             <div>
                 <label for="sourceLang">話し手の言語</label>
                 <select id="sourceLang">
-                    <option value="en" selected>英語 (English)</option>
-                    <option value="ja">日本語 (Japanese)</option>
+                    <option value="en-US" selected>英語 (English)</option>
+                    <option value="ja-JP">日本語 (Japanese)</option>
                 </select>
             </div>
             <div>
@@ -99,7 +93,7 @@
     </div>
 
     <div class="card">
-        <label>認識された音声 (Deepgram 原文)</label>
+        <label>認識された音声 (リアルタイム原文)</label>
         <div id="originalText" class="speech-box"></div>
     </div>
 
@@ -115,20 +109,12 @@
 </div>
 
 <script>
-    const STORAGE_DG_KEY = 'deepgram_api_key';
     const STORAGE_G_KEY = 'google_api_key';
 
-    let mediaStream = null;
-    let audioContext = null;
-    let processor = null;
+    let recognition = null;
     let isListening = false;
-    let isProcessing = false;
     let availableVoices = [];
-
-    let activePcmChunks = [];
-    let activeTotalBytes = 0;
-    let chunkTimer = null;
-    let currentSampleRate = 16000;
+    let interimSpan = null;
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
@@ -137,11 +123,8 @@
     const originalBox = document.getElementById('originalText');
     const translatedBox = document.getElementById('translatedText');
 
-    const deepgramKeyInput = document.getElementById('deepgramKey');
     const googleKeyInput = document.getElementById('googleKey');
-    const clearDgKeyBtn = document.getElementById('clearDgKeyBtn');
     const clearGkeyBtn = document.getElementById('clearGkeyBtn');
-    const saveDgHint = document.getElementById('saveDgHint');
     const saveGHint = document.getElementById('saveGHint');
 
     const sourceLangSelect = document.getElementById('sourceLang');
@@ -156,35 +139,18 @@
         const p = document.createElement('div');
         p.textContent = `[${time}] ${msg}`;
         if (type === 'error') p.style.color = '#ff453a';
-        if (type === 'warn') p.style.color = '#ffd60a';
         debugLog.appendChild(p);
         debugLog.scrollTop = debugLog.scrollHeight;
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        log("システム初期化完了 (v4.1 Debug)");
-        const savedDgKey = localStorage.getItem(STORAGE_DG_KEY);
-        if (savedDgKey) {
-            deepgramKeyInput.value = savedDgKey;
-            saveDgHint.style.display = 'block';
-        }
+        log("システム初期化完了 (v5.0 Stream)");
         const savedGKey = localStorage.getItem(STORAGE_G_KEY);
         if (savedGKey) {
             googleKeyInput.value = savedGKey;
             saveGHint.style.display = 'block';
         }
         initSpeechSynthesis();
-    });
-
-    deepgramKeyInput.addEventListener('input', () => {
-        const val = deepgramKeyInput.value.trim().replace(/\s+/g, '');
-        if (val) {
-            localStorage.setItem(STORAGE_DG_KEY, val);
-            saveDgHint.style.display = 'block';
-        } else {
-            localStorage.removeItem(STORAGE_DG_KEY);
-            saveDgHint.style.display = 'none';
-        }
     });
 
     googleKeyInput.addEventListener('input', () => {
@@ -196,12 +162,6 @@
             localStorage.removeItem(STORAGE_G_KEY);
             saveGHint.style.display = 'none';
         }
-    });
-
-    clearDgKeyBtn.addEventListener('click', () => {
-        deepgramKeyInput.value = '';
-        localStorage.removeItem(STORAGE_DG_KEY);
-        saveDgHint.style.display = 'none';
     });
 
     clearGkeyBtn.addEventListener('click', () => {
@@ -264,82 +224,7 @@
         window.speechSynthesis.speak(utterance);
     }
 
-    // WAVヘッダー生成
-    function createWavBlob(chunks, dataSize, sampleRate) {
-        const numChannels = 1;
-        const bitsPerSample = 16;
-        
-        const buffer = new ArrayBuffer(44 + dataSize);
-        const view = new DataView(buffer);
-
-        writeString(view, 0, 'RIFF');
-        view.setUint32(4, 36 + dataSize, true);
-        writeString(view, 8, 'WAVE');
-
-        writeString(view, 12, 'fmt ');
-        view.setUint32(16, 16, true);
-        view.setUint16(20, 1, true);
-        view.setUint16(22, numChannels, true);
-        view.setUint32(24, sampleRate, true);
-        view.setUint16(32, numChannels * (bitsPerSample / 8), true);
-        view.setUint16(34, bitsPerSample, true);
-
-        writeString(view, 36, 'data');
-        view.setUint32(40, dataSize, true);
-
-        let offset = 44;
-        for (const chunk of chunks) {
-            new Uint8Array(buffer, offset, chunk.byteLength).set(chunk);
-            offset += chunk.byteLength;
-        }
-
-        return new Blob([buffer], { type: 'audio/wav' });
-    }
-
-    function writeString(view, offset, string) {
-        for (let i = 0; i < string.length; i++) {
-            view.setUint8(offset + i, string.charCodeAt(i));
-        }
-    }
-
-    // Deepgram POST 送信 (詳細デバッグ表示)
-    async function transcribeWithDeepgram(wavBlob) {
-        const deepgramKey = deepgramKeyInput.value.trim().replace(/\s+/g, '');
-        if (!deepgramKey) return "";
-
-        const srcLang = sourceLangSelect.value;
-        const model = srcLang === 'ja' ? 'general' : 'nova-2';
-        const url = `https://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&smart_format=true&punctuate=true`;
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Token ${deepgramKey}`,
-                    'Content-Type': 'audio/wav'
-                },
-                body: wavBlob
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                log(`Deepgram エラー [${response.status}]: ${errorText}`, 'error');
-                return "";
-            }
-            
-            const data = await response.json();
-            const transcript = data.results?.channels[0]?.alternatives[0]?.transcript || '';
-            if (!transcript) {
-                log(`Deepgram 返答あり (音声認識テキストなし/無音)`, 'warn');
-            }
-            return transcript.trim();
-        } catch (e) {
-            log(`Deepgram 通信例外: ${e.message}`, 'error');
-            return "";
-        }
-    }
-
-    toggleBtn.addEventListener('click', async () => {
+    toggleBtn.addEventListener('click', () => {
         if (!isListening) {
             startTranslation();
         } else {
@@ -347,102 +232,75 @@
         }
     });
 
-    async function startTranslation() {
+    function startTranslation() {
         errorLog.textContent = '';
-        const dgKey = deepgramKeyInput.value.trim().replace(/\s+/g, '');
         const gKey = googleKeyInput.value.trim().replace(/\s+/g, '');
 
-        if (!dgKey || !gKey) {
-            alert('Deepgram API Key と Google Translate API Key の両方を入力してください。');
+        if (!gKey) {
+            alert('Google Translate API Key を入力してください。');
             return;
         }
 
-        log("マイク許可を取得中...");
-        try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            log("マイク接続成功");
-        } catch (e) {
-            log("マイクアクセス拒否: " + e.message, 'error');
-            errorLog.textContent = 'マイクアクセスが拒否されました。';
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert('お使いのブラウザはリアルタイム音声認識に対応していません。Chromeでお試しください。');
             return;
         }
 
-        isListening = true;
-        toggleBtn.textContent = '翻訳を停止する';
-        toggleBtn.classList.add('stop');
-        statusDiv.textContent = '音声認識中 (Deepgram)...';
-        statusDiv.style.color = '#34c759';
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = sourceLangSelect.value;
 
-        startAudioProcessing(mediaStream);
-    }
+        recognition.onstart = () => {
+            isListening = true;
+            toggleBtn.textContent = '翻訳を停止する';
+            toggleBtn.classList.add('stop');
+            statusDiv.textContent = '音声認識中 (高速ストリーミング)...';
+            statusDiv.style.color = '#34c759';
+            log("音声認識ストリーム開始");
+        };
 
-    function startAudioProcessing(stream) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        currentSampleRate = audioContext.sampleRate;
-        log(`AudioContext起動 (SampleRate: ${currentSampleRate}Hz)`);
+        recognition.onresult = async (event) => {
+            let finalTranscript = '';
+            let interimTranscript = '';
 
-        const source = audioContext.createMediaStreamSource(stream);
-        processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-        processor.onaudioprocess = (e) => {
-            if (!isListening) return;
-
-            const inputData = e.inputBuffer.getChannelData(0);
-            const pcm16 = new Int16Array(inputData.length);
-
-            for (let i = 0; i < inputData.length; i++) {
-                let s = Math.max(-1, Math.min(1, inputData[i]));
-                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
             }
 
-            const uint8Chunk = new Uint8Array(pcm16.buffer);
-            activePcmChunks.push(uint8Chunk);
-            activeTotalBytes += uint8Chunk.byteLength;
+            if (interimTranscript) {
+                showInterim(interimTranscript);
+            }
 
-            if (!chunkTimer) {
-                chunkTimer = setTimeout(() => {
-                    chunkTimer = null;
-                    processQueue();
-                }, 2000); // 2秒ごとに送信
+            if (finalTranscript) {
+                clearInterim();
+                log(`[確定原文]: "${finalTranscript}"`);
+                appendMessage(originalBox, finalTranscript);
+
+                const translated = await translateText(finalTranscript);
+                log(`[翻訳結果]: "${translated}"`);
+                appendMessage(translatedBox, translated);
+                speakText(translated);
             }
         };
 
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-    }
+        recognition.onerror = (e) => {
+            log(`音声認識エラー: ${e.error}`, 'error');
+        };
 
-    async function processQueue() {
-        if (isProcessing || activePcmChunks.length === 0) return;
-        isProcessing = true;
-
-        const chunksToProcess = [...activePcmChunks];
-        const bytesToProcess = activeTotalBytes;
-
-        activePcmChunks = [];
-        activeTotalBytes = 0;
-
-        try {
-            if (bytesToProcess > 3200) {
-                log(`Deepgramへ音声データ送信中 (${bytesToProcess} bytes)...`);
-                const wavBlob = createWavBlob(chunksToProcess, bytesToProcess, currentSampleRate);
-                const transcript = await transcribeWithDeepgram(wavBlob);
-
-                if (transcript) {
-                    log(`[Deepgram 認識結果]: "${transcript}"`);
-                    appendMessage(originalBox, transcript);
-
-                    log("Google翻訳実行中...");
-                    const translated = await translateText(transcript);
-                    log(`[Google 翻訳結果]: "${translated}"`);
-                    appendMessage(translatedBox, translated);
-                    speakText(translated);
-                }
+        recognition.onend = () => {
+            if (isListening) {
+                log("ストリーム再接続中...");
+                recognition.start();
             }
-        } catch (e) {
-            log("処理エラー: " + e.message, 'error');
-        } finally {
-            isProcessing = false;
-        }
+        };
+
+        recognition.start();
     }
 
     function stopTranslation() {
@@ -452,23 +310,34 @@
         statusDiv.textContent = '停止中';
         statusDiv.style.color = '#86868b';
 
-        if (chunkTimer) { clearTimeout(chunkTimer); chunkTimer = null; }
-        activePcmChunks = [];
-        activeTotalBytes = 0;
-
-        if (processor) { processor.disconnect(); processor = null; }
-        if (audioContext) { audioContext.close(); audioContext = null; }
-
-        if (mediaStream) {
-            mediaStream.getTracks().forEach(track => track.stop());
-            mediaStream = null;
+        if (recognition) {
+            recognition.stop();
+            recognition = null;
         }
 
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
         }
 
+        clearInterim();
         log("システム停止完了");
+    }
+
+    function showInterim(text) {
+        if (!interimSpan) {
+            interimSpan = document.createElement('span');
+            interimSpan.className = 'interim';
+            originalBox.appendChild(interimSpan);
+        }
+        interimSpan.textContent = text;
+        originalBox.scrollTop = originalBox.scrollHeight;
+    }
+
+    function clearInterim() {
+        if (interimSpan) {
+            interimSpan.remove();
+            interimSpan = null;
+        }
     }
 
     async function translateText(text) {
