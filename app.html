@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v10.0 Whisper統合版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v10.1)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -53,7 +53,7 @@
 
   <div class="main-container">
     <div class="display-box">
-      <div class="section-title">【リアルタイム英語文字起こし (OPENAI WHISPER API)】</div>
+      <div class="section-title">【リアルタイム英語文字起こし (WHISPER API)】</div>
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
     <div class="display-box japanese">
@@ -65,7 +65,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v10.0</span>
+      <span class="badge">v10.1</span>
     </h2>
 
     <div>
@@ -112,7 +112,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v10.0] OpenAI Whisper + Gemini Engine Ready.</div>
+    <div id="logBox" class="log-box">[System v10.1] Whisper Filter Ready.</div>
   </div>
 
   <script>
@@ -217,12 +217,12 @@
     }
 
     async function processWhisperAndTranslate(audioBlob, openaiKey, geminiKey) {
-      log("Whisper", "音声データを送信中...");
-
       const formData = new FormData();
       formData.append("file", audioBlob, "audio.webm");
       formData.append("model", "whisper-1");
       formData.append("language", "en");
+      // 無音時の「Thank you.」連発を抑止する指示パラメータ
+      formData.append("prompt", "Transcribe the spoken English accurately. Do not output anything if there is silence.");
 
       try {
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -238,12 +238,17 @@
         }
 
         const data = await response.json();
-        const englishText = data.text ? data.text.trim() : '';
+        let englishText = data.text ? data.text.trim() : '';
+
+        // Whisperの無音幻聴パターン（Thank you, Youなど）を除外
+        if (/^(thank you|you|\.|\s)+$/i.test(englishText)) {
+          englishText = '';
+        }
 
         if (englishText) {
           fullTranscript += (fullTranscript ? ' ' : '') + englishText;
           renderEnglish();
-          log("Whisper", `認識完了: "${englishText.substring(0, 30)}..."`);
+          log("Whisper", `認識成功: "${englishText}"`);
 
           await translateWithGemini(englishText, geminiKey);
         }
@@ -256,12 +261,10 @@
       let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
 
-      const prompt = `You are an expert translator for presentations and lectures (like TED Talks). 
-Translate the following English speech segment into clear, natural, and fluent Japanese.
-Correct the context naturally and output ONLY the translated Japanese text. 
-Do NOT include original English, explanations, markdown, or notes.
+      const prompt = `Translate the following English presentation/lecture segment into clear, natural, and fluent Japanese.
+Output ONLY the translated Japanese text. Do NOT include original English, explanations, or quotes.
 
-English Speech:
+English:
 "${englishText}"`;
 
       try {
@@ -270,7 +273,7 @@ English Speech:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.2, maxOutputTokens: 300 }
+            generationConfig: { temperature: 0.1, maxOutputTokens: 300 }
           })
         });
 
