@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v9.3)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v10.0 Whisper統合版)</title>
   <style>
     * { box-sizing: border-box; }
     body {
       background-color: #111;
       color: #00FF00;
-      font-family: Arial, sans-serif;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       margin: 0;
       padding: 15px;
       display: flex;
@@ -28,12 +28,11 @@
     .section-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
     .display-box.japanese .section-title { color: #00FFFF; }
     .content-area {
-      color: #00FF00; font-size: 15px; font-weight: bold; line-height: 1.5;
+      color: #00FF00; font-size: 15px; font-weight: bold; line-height: 1.6;
       overflow-y: auto; flex: 1; white-space: pre-wrap; word-break: break-word;
-      background: #050505; padding: 10px; border: 1px solid #222; border-radius: 4px;
+      background: #050505; padding: 12px; border: 1px solid #222; border-radius: 4px;
     }
-    .display-box.japanese .content-area { color: #FFFFFF; }
-    .interim-text { color: #888888; font-style: italic; }
+    .display-box.japanese .content-area { color: #FFFFFF; font-size: 15px; font-weight: normal; }
     .side-panel {
       width: 360px; display: flex; flex-direction: column; gap: 10px;
       background: #1a1a1a; padding: 12px; border-radius: 8px; border: 1px solid #333;
@@ -54,11 +53,11 @@
 
   <div class="main-container">
     <div class="display-box">
-      <div class="section-title">【リアルタイム英語文字起こし (WEB SPEECH API)】</div>
+      <div class="section-title">【リアルタイム英語文字起こし (OPENAI WHISPER API)】</div>
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
     <div class="display-box japanese">
-      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 爆速追従版)】</div>
+      <div class="section-title">【自然な日本語訳 (GEMINI 文脈補正版)】</div>
       <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
     </div>
   </div>
@@ -66,12 +65,17 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v9.3</span>
+      <span class="badge">v10.0</span>
     </h2>
 
     <div>
-      <label style="color:#00FF00; font-weight:bold;">Gemini API Key (Google AI Studio):</label>
-      <input type="password" id="apiKey" placeholder="AIzaSy...">
+      <label style="color:#00FF00; font-weight:bold;">OpenAI API Key (Whisper用):</label>
+      <input type="password" id="openaiKey" placeholder="sk-proj-...">
+    </div>
+
+    <div>
+      <label style="color:#00FF00; font-weight:bold;">Gemini API Key (翻訳用):</label>
+      <input type="password" id="geminiKey" placeholder="AIzaSy...">
     </div>
 
     <div>
@@ -80,16 +84,13 @@
     </div>
 
     <div>
-      <label style="color:#00FF00; font-weight:bold;">音声認識 言語設定:</label>
-      <select id="languageSelect">
-        <option value="en-US" selected>英語 (米国 - en-US)</option>
-        <option value="en-GB">英語 (英国 - en-GB)</option>
-      </select>
+      <label style="color:#00FF00; font-weight:bold;">音声送信間隔 (秒):</label>
+      <input type="number" id="intervalSec" value="5" min="2" max="15">
     </div>
 
     <div style="display:flex; gap:8px;">
-      <button id="startBtn" onclick="startRecognition()">🎤 認識開始</button>
-      <button id="stopBtn" class="stop-btn" onclick="stopRecognition()" disabled>⏹ 停止</button>
+      <button id="startBtn" onclick="startProcessing()">🎤 認識開始</button>
+      <button id="stopBtn" class="stop-btn" onclick="stopProcessing()" disabled>⏹ 停止</button>
     </div>
 
     <div style="display:flex; gap:8px;">
@@ -111,19 +112,15 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v9.3] Real-time Stream Engine Ready.</div>
+    <div id="logBox" class="log-box">[System v10.0] OpenAI Whisper + Gemini Engine Ready.</div>
   </div>
 
   <script>
-    let recognition = null;
-    let isRecognizing = false;
-    
-    let rawFinalEn = '';
-    let rawInterimEn = '';
-    
-    let processedCharLength = 0;
-    let timerId = null;
+    let isRunning = false;
+    let audioStream = null;
+    let mediaRecorder = null;
 
+    let fullTranscript = '';
     let finalJapaneseText = '';
 
     let ttsQueue = [];
@@ -131,16 +128,21 @@
     let isSpeakingNow = false;
 
     window.addEventListener('DOMContentLoaded', () => {
-      const savedKey = localStorage.getItem('gemini_api_key');
-      if (savedKey) document.getElementById('apiKey').value = savedKey;
+      const savedOpenaiKey = localStorage.getItem('openai_api_key');
+      if (savedOpenaiKey) document.getElementById('openaiKey').value = savedOpenaiKey;
+
+      const savedGeminiKey = localStorage.getItem('gemini_api_key');
+      if (savedGeminiKey) document.getElementById('geminiKey').value = savedGeminiKey;
 
       const savedModel = localStorage.getItem('gemini_model_name');
       if (savedModel) document.getElementById('modelInput').value = savedModel;
-
-      initSpeechRecognition();
     });
 
-    document.getElementById('apiKey').addEventListener('change', (e) => {
+    document.getElementById('openaiKey').addEventListener('change', (e) => {
+      localStorage.setItem('openai_api_key', e.target.value.trim());
+    });
+
+    document.getElementById('geminiKey').addEventListener('change', (e) => {
       localStorage.setItem('gemini_api_key', e.target.value.trim());
     });
 
@@ -161,43 +163,126 @@
       if (statusEl) statusEl.innerText = msg;
     }
 
-    async function translateChunk(textToTranslate) {
-      const apiKey = document.getElementById('apiKey').value.trim();
-      let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
-      
-      if (!apiKey || !textToTranslate.trim()) return;
+    async function startProcessing() {
+      const openaiKey = document.getElementById('openaiKey').value.trim();
+      const geminiKey = document.getElementById('geminiKey').value.trim();
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+      if (!openaiKey || !geminiKey) {
+        alert("OpenAI API Key と Gemini API Key の両方を入力してください。");
+        return;
+      }
 
-      const requestData = {
-        contents: [{
-          parts: [{ 
-            text: "Translate the following English speech transcript fragment into Japanese. Output ONLY the Japanese translation. Never include English text, quotes, or notes.\n\nEnglish: " + textToTranslate 
-          }]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 200
+      try {
+        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        isRunning = true;
+
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+        setStatus("録音・解析中... (マイクON)");
+        log("System", "マイク録音を開始しました");
+
+        const intervalMs = parseInt(document.getElementById('intervalSec').value) * 1000;
+        recordAndProcessChunk(openaiKey, geminiKey, intervalMs);
+
+      } catch (e) {
+        log("Error", `マイク起動エラー: ${e.message}`);
+        setStatus("エラー: マイク起動失敗");
+      }
+    }
+
+    function recordAndProcessChunk(openaiKey, geminiKey, duration) {
+      if (!isRunning) return;
+
+      const chunks = [];
+      mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+
+      mediaRecorder.onstop = async () => {
+        if (chunks.length > 0 && isRunning) {
+          const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+          processWhisperAndTranslate(audioBlob, openaiKey, geminiKey);
+        }
+        if (isRunning) {
+          recordAndProcessChunk(openaiKey, geminiKey, duration);
         }
       };
+
+      mediaRecorder.start();
+      setTimeout(() => {
+        if (mediaRecorder && mediaRecorder.state === "recording") {
+          mediaRecorder.stop();
+        }
+      }, duration);
+    }
+
+    async function processWhisperAndTranslate(audioBlob, openaiKey, geminiKey) {
+      log("Whisper", "音声データを送信中...");
+
+      const formData = new FormData();
+      formData.append("file", audioBlob, "audio.webm");
+      formData.append("model", "whisper-1");
+      formData.append("language", "en");
+
+      try {
+        const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${openaiKey}` },
+          body: formData
+        });
+
+        if (!response.ok) {
+          const errData = await response.json();
+          log("Whisper Error", errData.error?.message || response.statusText);
+          return;
+        }
+
+        const data = await response.json();
+        const englishText = data.text ? data.text.trim() : '';
+
+        if (englishText) {
+          fullTranscript += (fullTranscript ? ' ' : '') + englishText;
+          renderEnglish();
+          log("Whisper", `認識完了: "${englishText.substring(0, 30)}..."`);
+
+          await translateWithGemini(englishText, geminiKey);
+        }
+      } catch (e) {
+        log("Error", `Whisper 通信エラー: ${e.message}`);
+      }
+    }
+
+    async function translateWithGemini(englishText, geminiKey) {
+      let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
+
+      const prompt = `You are an expert translator for presentations and lectures (like TED Talks). 
+Translate the following English speech segment into clear, natural, and fluent Japanese.
+Correct the context naturally and output ONLY the translated Japanese text. 
+Do NOT include original English, explanations, markdown, or notes.
+
+English Speech:
+"${englishText}"`;
 
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestData)
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 300 }
+          })
         });
 
         if (response.ok) {
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-          
-          // 英文や記号の残存を除去
-          translatedText = translatedText.replace(/[a-zA-Z]{4,}/g, '');
-          translatedText = translatedText.replace(/^[`"'\s\-*]+|[`"'\s\-*]+$/g, '');
+
+          translatedText = translatedText.replace(/[a-zA-Z]{3,}/g, '');
+          translatedText = translatedText.replace(/^[`"'\s\-*:]+|[`"'\s\-*:]+$/g, '');
 
           if (translatedText.trim()) {
-            finalJapaneseText += translatedText + ' ';
+            finalJapaneseText += (finalJapaneseText ? '\n' : '') + translatedText;
             renderJapanese();
 
             if (isTtsActive) {
@@ -210,33 +295,36 @@
           log("Gemini Error", errData.error?.message || response.statusText);
         }
       } catch (e) {
-        log("Error", `通信エラー: ${e.message}`);
+        log("Error", `Gemini 通信エラー: ${e.message}`);
+      }
+    }
+
+    function renderEnglish() {
+      const enDisplay = document.getElementById('transcriptDisplay');
+      if (enDisplay) {
+        enDisplay.innerText = fullTranscript || '(音声認識を開始してください...)';
+        enDisplay.scrollTop = enDisplay.scrollHeight;
       }
     }
 
     function renderJapanese() {
       const jaDisplay = document.getElementById('translationDisplay');
       if (jaDisplay) {
-        jaDisplay.innerHTML = finalJapaneseText || '(翻訳結果がここに表示されます...)';
+        jaDisplay.innerText = finalJapaneseText || '(翻訳結果がここに表示されます...)';
         jaDisplay.scrollTop = jaDisplay.scrollHeight;
       }
     }
 
-    function processStreamBuffer() {
-      if (!isRecognizing) return;
-
-      const fullText = (rawFinalEn + ' ' + rawInterimEn).trim();
-      if (fullText.length > processedCharLength + 30) {
-        const unprocessedChunk = fullText.substring(processedCharLength).trim();
-        
-        // スペースで区切って安全な切り出しポイントを探す
-        const lastSpacePos = unprocessedChunk.lastIndexOf(' ');
-        if (lastSpacePos > 20) {
-          const chunkToSend = unprocessedChunk.substring(0, lastSpacePos);
-          processedCharLength += chunkToSend.length + 1;
-          translateChunk(chunkToSend);
-        }
+    function stopProcessing() {
+      isRunning = false;
+      if (audioStream) {
+        audioStream.getTracks().forEach(track => track.stop());
       }
+      stopSpeaking();
+      setStatus("停止中");
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+      log("System", "処理を停止しました");
     }
 
     function toggleContinuousTTS() {
@@ -248,7 +336,8 @@
       if (!('speechSynthesis' in window)) return;
       isTtsActive = true;
       ttsQueue = [];
-      if (finalJapaneseText.trim()) ttsQueue.push(finalJapaneseText.trim());
+      const lines = finalJapaneseText.trim().split('\n').filter(l => l.trim().length > 0);
+      if (lines.length > 0) ttsQueue.push(lines[lines.length - 1]);
 
       const btn = document.getElementById('ttsBtn');
       if (btn) {
@@ -294,97 +383,12 @@
       log("TTS", "朗読を停止しました");
     }
 
-    function initSpeechRecognition() {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SpeechRecognition) {
-        setStatus("エラー: ブラウザがWeb Speech API非対応です");
-        return false;
-      }
-
-      recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = document.getElementById('languageSelect').value;
-
-      recognition.onstart = () => {
-        isRecognizing = true;
-        setStatus("音声認識中... (マイクON)");
-        document.getElementById('startBtn').disabled = true;
-        document.getElementById('stopBtn').disabled = false;
-        log("System", "音声認識を開始しました");
-
-        if (timerId) clearInterval(timerId);
-        timerId = setInterval(processStreamBuffer, 700);
-      };
-
-      recognition.onresult = (event) => {
-        let interim = '';
-        let final = '';
-
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            final += event.results[i][0].transcript + ' ';
-          } else {
-            interim += event.results[i][0].transcript + ' ';
-          }
-        }
-
-        if (final) rawFinalEn += final;
-        rawInterimEn = interim;
-
-        const enDisplay = document.getElementById('transcriptDisplay');
-        if (enDisplay) {
-          enDisplay.innerHTML = rawFinalEn + (rawInterimEn ? `<span class="interim-text">${rawInterimEn}</span>` : '');
-          enDisplay.scrollTop = enDisplay.scrollHeight;
-        }
-      };
-
-      recognition.onerror = (e) => log("Error", `認識エラー: ${e.error}`);
-
-      recognition.onend = () => {
-        if (isRecognizing) {
-          try { recognition.start(); } catch (e) {}
-        } else {
-          if (timerId) clearInterval(timerId);
-          setStatus("停止中");
-          document.getElementById('startBtn').disabled = false;
-          document.getElementById('stopBtn').disabled = true;
-          log("System", "音声認識を停止しました");
-        }
-      };
-      return true;
-    }
-
-    function startRecognition() {
-      if (!recognition) {
-        if (!initSpeechRecognition()) return;
-      }
-      isRecognizing = true;
-      processedCharLength = 0;
-      recognition.lang = document.getElementById('languageSelect').value;
-      try {
-        recognition.start();
-      } catch (e) {
-        log("Error", `開始エラー: ${e.message}`);
-      }
-    }
-
-    function stopRecognition() {
-      isRecognizing = false;
-      if (timerId) clearInterval(timerId);
-      if (recognition) recognition.stop();
-      stopSpeaking();
-      setStatus("停止処理中...");
-    }
-
     function clearTranscript() {
       stopSpeaking();
-      rawFinalEn = '';
-      rawInterimEn = '';
+      fullTranscript = '';
       finalJapaneseText = '';
-      processedCharLength = 0;
-      document.getElementById('transcriptDisplay').innerText = '(音声認識を開始してください...)';
-      document.getElementById('translationDisplay').innerText = '(翻訳結果がここに表示されます...)';
+      renderEnglish();
+      renderJapanese();
     }
 
     function clearLog() {
@@ -393,9 +397,8 @@
     }
 
     async function downloadTranscript() {
-      const fullEn = (rawFinalEn + ' ' + rawInterimEn).trim();
-      if (!fullEn && !finalJapaneseText) return;
-      const fileContent = `【英文講義テキスト】\n${fullEn}\n\n【日本語訳】\n${finalJapaneseText}`;
+      if (!fullTranscript && !finalJapaneseText) return;
+      const fileContent = `【英文講義テキスト (Whisper)】\n${fullTranscript}\n\n【日本語訳 (Gemini)】\n${finalJapaneseText}`;
       const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
