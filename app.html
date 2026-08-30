@@ -3,11 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v7.3 Cloud Translation API版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v7.5 高精度・文脈維持版)</title>
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
     body {
       background-color: #111;
       color: #00FF00;
@@ -35,18 +33,14 @@
       flex: 1;
       overflow: hidden;
     }
-    .display-box.japanese {
-      border-color: #00FFFF;
-    }
+    .display-box.japanese { border-color: #00FFFF; }
     .section-title {
       font-size: 11px;
       color: #888;
       text-transform: uppercase;
       letter-spacing: 1px;
     }
-    .display-box.japanese .section-title {
-      color: #00FFFF;
-    }
+    .display-box.japanese .section-title { color: #00FFFF; }
     .content-area {
       color: #00FF00;
       font-size: 15px;
@@ -61,9 +55,8 @@
       border: 1px solid #222;
       border-radius: 4px;
     }
-    .display-box.japanese .content-area {
-      color: #FFFFFF;
-    }
+    .display-box.japanese .content-area { color: #FFFFFF; }
+    .interim-text { color: #888888; font-style: italic; display: block; margin-top: 4px; }
     .side-panel {
       width: 360px;
       display: flex;
@@ -93,7 +86,7 @@
       border-radius: 10px;
       font-weight: bold;
     }
-    input, textarea, button, select {
+    input, select, button {
       background: #222;
       border: 1px solid #444;
       color: #fff;
@@ -111,17 +104,9 @@
       padding: 9px;
       transition: background 0.2s;
     }
-    button:hover {
-      background: #00dd00;
-      color: #000;
-    }
-    button.stop-btn {
-      background: #cc3333;
-    }
-    button.stop-btn:hover {
-      background: #ff4444;
-      color: #fff;
-    }
+    button:hover { background: #00dd00; color: #000; }
+    button.stop-btn { background: #cc3333; }
+    button.stop-btn:hover { background: #ff4444; color: #fff; }
     .status {
       font-size: 11px;
       color: #aaa;
@@ -148,14 +133,12 @@
 <body>
 
   <div class="main-container">
-    <!-- 上段：英語文字起こし -->
     <div class="display-box">
       <div class="section-title">【リアルタイム英語文字起こし (Web Speech API)】</div>
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
-    <!-- 下段：日本語訳 -->
     <div class="display-box japanese">
-      <div class="section-title">【リアルタイム日本語訳 (Google Cloud Translation)】</div>
+      <div class="section-title">【リアルタイム日本語訳 (文脈維持・安全上書き版)】</div>
       <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
     </div>
   </div>
@@ -163,7 +146,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v7.3</span>
+      <span class="badge">v7.5</span>
     </h2>
 
     <div>
@@ -184,7 +167,6 @@
       <button id="stopBtn" class="stop-btn" onclick="stopRecognition()" disabled>⏹ 停止</button>
     </div>
 
-    <!-- 和訳音声読上げ用コントロール -->
     <div style="display:flex; gap:8px;">
       <button onclick="speakJapanese()" style="background:#00aaff; color:#000;">🔊 和訳を朗読</button>
       <button onclick="stopSpeaking()" style="background:#882222; width:40%;">⏹ 読上停止</button>
@@ -201,10 +183,10 @@
     <div id="status" class="status">待機中</div>
 
     <div style="display:flex; justify-content:space-between; align-items:center;">
-      <span style="font-weight:bold; color:#00FF00;">【詳細ログ・除外フィルタ結果】</span>
+      <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v7.3] Ready.</div>
+    <div id="logBox" class="log-box">[System v7.5] Ready.</div>
   </div>
 
   <script>
@@ -212,14 +194,13 @@
     let isRecognizing = false;
     let finalEnglishText = '';
     let finalJapaneseText = '';
+    let interimJapaneseText = '';
     let wakeLock = null;
+    let translateTimer = null;
 
-    // ローカルストレージ復元
     window.addEventListener('DOMContentLoaded', () => {
       const savedKey = localStorage.getItem('gcloud_translation_key');
-      if (savedKey) {
-        document.getElementById('apiKey').value = savedKey;
-      }
+      if (savedKey) document.getElementById('apiKey').value = savedKey;
       initSpeechRecognition();
     });
 
@@ -227,148 +208,69 @@
       localStorage.setItem('gcloud_translation_key', e.target.value.trim());
     });
 
-    // 非英語文字除去フィルタ
     function cleanEnglishOnly(text) {
       if (!text) return '';
       let cleaned = text.replace(/[^a-zA-Z0-9\s.,?!'\"]/g, '');
-      cleaned = cleaned.replace(/\s+/g, ' ').trim();
-      return cleaned;
+      return cleaned.replace(/\s+/g, ' ').trim();
     }
 
     function log(tag, msg) {
       const timeStr = new Date().toLocaleTimeString();
       const logBox = document.getElementById('logBox');
       logBox.innerText = `[${timeStr}] [${tag}] ${msg}\n` + logBox.innerText;
-      console.log(`[${tag}] ${msg}`);
     }
 
     function setStatus(msg) {
       document.getElementById('status').innerText = msg;
     }
 
-    // スリープ防止（Wake Lock）
     async function requestWakeLock() {
       try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await navigator.wakeLock.request('screen');
-          log("System", "画面スリープ防止 (Wake Lock) アクティブ");
-        }
-      } catch (err) {
-        log("System", `Wake Lock エラー: ${err.message}`);
-      }
+        if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+      } catch (err) {}
     }
 
     function releaseWakeLock() {
-      if (wakeLock !== null) {
-        wakeLock.release();
-        wakeLock = null;
-        log("System", "画面スリープ防止 解除");
-      }
+      if (wakeLock !== null) { wakeLock.release(); wakeLock = null; }
     }
 
-    // Google Cloud Translation API (v2) 呼び出し
-    async function translateText(englishSentence) {
+    // Google Cloud Translation API リクエスト
+    async function fetchTranslation(text) {
       const apiKey = document.getElementById('apiKey').value.trim();
-      if (!apiKey) {
-        log("Translate", "API Key未設定のため翻訳スキップ");
-        return;
-      }
+      if (!apiKey || !text.trim()) return '';
 
       const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
-
       try {
-        log("Translate", `送信中: "${englishSentence}"`);
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            q: englishSentence,
-            source: 'en',
-            target: 'ja',
-            format: 'text'
-          })
+          body: JSON.stringify({ q: text, source: 'en', target: 'ja', format: 'text' })
         });
-
         if (response.ok) {
           const data = await response.json();
-          if (data.data && data.data.translations && data.data.translations.length > 0) {
-            const jaText = data.data.translations[0].translatedText;
-            log("Translate", `翻訳成功: "${jaText}"`);
-            
-            finalJapaneseText += jaText + '\n';
-            const jaDisplay = document.getElementById('translationDisplay');
-            jaDisplay.innerText = finalJapaneseText;
-            jaDisplay.scrollTop = jaDisplay.scrollHeight;
-          }
-        } else {
-          const errData = await response.json();
-          log("Error", `APIエラー(${response.status}): ${errData.error?.message || '不明なエラー'}`);
+          return data.data?.translations[0]?.translatedText || '';
         }
       } catch (e) {
-        log("Error", `翻訳通信エラー: ${e.message}`);
+        log("Error", `通信エラー: ${e.message}`);
       }
+      return '';
     }
 
-    // 和訳音声読上げ機能
-    function speakJapanese() {
-      if (!('speechSynthesis' in window)) {
-        alert("お使いのブラウザは音声読上げに対応していません。");
-        return;
+    // 表示更新（確定文章と仮訳の完全分離）
+    function renderJapanese() {
+      const jaDisplay = document.getElementById('translationDisplay');
+      let html = finalJapaneseText;
+      if (interimJapaneseText) {
+        html += `<span class="interim-text">💬 ${interimJapaneseText}</span>`;
       }
-
-      const text = finalJapaneseText.trim();
-      if (!text) {
-        alert("読上げる和訳テキストがありません。");
-        return;
-      }
-
-      window.speechSynthesis.cancel();
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ja-JP';
-      utterance.rate = 1.0;
-      utterance.pitch = 1.0;
-
-      utterance.onstart = () => {
-        log("TTS", "和訳の音声読上げを開始します。");
-        setStatus("🔊 和訳音声読上げ中...");
-      };
-
-      utterance.onend = () => {
-        log("TTS", "読上げが完了しました。");
-        if (isRecognizing) {
-          setStatus("音声認識中... (マイクON)");
-        } else {
-          setStatus("停止中");
-        }
-      };
-
-      utterance.onerror = (e) => {
-        log("Error", `読上げエラー: ${e.error}`);
-      };
-
-      window.speechSynthesis.speak(utterance);
-    }
-
-    function stopSpeaking() {
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        log("TTS", "読上げを停止しました。");
-        if (isRecognizing) {
-          setStatus("音声認識中... (マイクON)");
-        } else {
-          setStatus("停止中");
-        }
-      }
+      jaDisplay.innerHTML = html || '(翻訳結果がここに表示されます...)';
+      jaDisplay.scrollTop = jaDisplay.scrollHeight;
     }
 
     function initSpeechRecognition() {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
       if (!SpeechRecognition) {
-        setStatus("エラー: お使いのブラウザは Web Speech API 非対応です。");
-        log("Error", "Web Speech API not supported.");
-        document.getElementById('startBtn').disabled = true;
+        setStatus("エラー: ブラウザがWeb Speech API非対応です");
         return false;
       }
 
@@ -380,53 +282,59 @@
       recognition.onstart = () => {
         isRecognizing = true;
         setStatus("音声認識中... (マイクON)");
-        log("System", "音声認識開始");
         document.getElementById('startBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
         requestWakeLock();
       };
 
       recognition.onresult = (event) => {
-        let interimTranscript = '';
+        let currentInterimEn = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const rawText = event.results[i][0].transcript;
           const filteredText = cleanEnglishOnly(rawText);
-
           if (!filteredText) continue;
 
           if (event.results[i].isFinal) {
+            // 確定テキストの追加処理
             finalEnglishText += filteredText + '. ';
-            log("Final", filteredText);
             
-            // 確定した英文を直接 Google Cloud Translation API へ送信
-            translateText(filteredText);
+            // 確定文節を正式に翻訳して本文に蓄積
+            fetchTranslation(filteredText).then(jaText => {
+              if (jaText) {
+                finalJapaneseText += jaText + '\n';
+                interimJapaneseText = ''; // 仮訳をリセット
+                renderJapanese();
+              }
+            });
           } else {
-            interimTranscript += filteredText;
+            currentInterimEn += filteredText;
           }
         }
 
+        // 英語画面の描画更新
         const enDisplay = document.getElementById('transcriptDisplay');
-        enDisplay.innerText = finalEnglishText + (interimTranscript ? `\n(認識中...: ${interimTranscript})` : '');
+        enDisplay.innerHTML = finalEnglishText + (currentInterimEn ? `<span class="interim-text">${currentInterimEn}</span>` : '');
         enDisplay.scrollTop = enDisplay.scrollHeight;
-      };
 
-      recognition.onerror = (event) => {
-        log("Error", `認識エラー: ${event.error}`);
-        if (event.error === 'not-allowed') {
-          setStatus("エラー: マイク許可が拒否されました。");
+        // リアルタイム仮訳（デバウンス処理：300ms間入力が落ち着いたら一括で仮翻訳）
+        if (currentInterimEn) {
+          clearTimeout(translateTimer);
+          translateTimer = setTimeout(async () => {
+            const jaText = await fetchTranslation(currentInterimEn);
+            if (jaText) {
+              interimJapaneseText = jaText;
+              renderJapanese();
+            }
+          }, 300);
         }
       };
+
+      recognition.onerror = (e) => log("Error", `認識エラー: ${e.error}`);
 
       recognition.onend = () => {
-        log("System", "音声認識セッション終了");
         if (isRecognizing) {
-          log("System", "自動再接続中...");
-          try {
-            recognition.start();
-          } catch (e) {
-            log("Error", `再接続失敗: ${e.message}`);
-          }
+          try { recognition.start(); } catch (e) {}
         } else {
           setStatus("停止中");
           document.getElementById('startBtn').disabled = false;
@@ -434,101 +342,63 @@
           releaseWakeLock();
         }
       };
-
       return true;
     }
 
     function startRecognition() {
       if (!recognition && !initSpeechRecognition()) return;
       isRecognizing = true;
-      try {
-        recognition.lang = document.getElementById('languageSelect').value;
-        recognition.start();
-      } catch (e) {
-        log("Error", `開始エラー: ${e.message}`);
-      }
+      recognition.lang = document.getElementById('languageSelect').value;
+      recognition.start();
     }
 
     function stopRecognition() {
       isRecognizing = false;
-      if (recognition) {
-        recognition.stop();
-      }
+      if (recognition) recognition.stop();
       stopSpeaking();
       setStatus("停止処理中...");
+    }
+
+    function speakJapanese() {
+      if (!('speechSynthesis' in window)) return;
+      const text = finalJapaneseText.trim();
+      if (!text) return;
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ja-JP';
+      utterance.rate = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function stopSpeaking() {
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     }
 
     function clearTranscript() {
       stopSpeaking();
       finalEnglishText = '';
       finalJapaneseText = '';
+      interimJapaneseText = '';
       document.getElementById('transcriptDisplay').innerText = '(音声認識を開始してください...)';
       document.getElementById('translationDisplay').innerText = '(翻訳結果がここに表示されます...)';
-      log("System", "表示テキストをクリアしました。");
     }
 
     function clearLog() {
       document.getElementById('logBox').innerText = '[Cleared]';
     }
 
-    // スマホ・PC共通のファイル保存処理
     async function downloadTranscript() {
-      if (!finalEnglishText && !finalJapaneseText) {
-        alert("保存するテキストがありません。");
-        return;
-      }
-
-      const now = new Date();
-      const timeStr = now.toISOString().slice(0, 10) + '_' + now.toTimeString().slice(0, 8).replace(/:/g, '');
-      const defaultFileName = `lecture_transcript_${timeStr}.txt`;
-      
-      const fileContent = `========================================\n`
-                        + `【英文講義テキスト】\n`
-                        + `========================================\n\n`
-                        + `${finalEnglishText}\n\n`
-                        + `========================================\n`
-                        + `【日本語訳】\n`
-                        + `========================================\n\n`
-                        + `${finalJapaneseText}`;
-
-      if ('showSaveFilePicker' in window) {
-        try {
-          const handle = await window.showSaveFilePicker({
-            suggestedName: defaultFileName,
-            types: [{
-              description: 'Text Document',
-              accept: { 'text/plain': ['.txt'] },
-            }],
-          });
-          const writable = await handle.createWritable();
-          await writable.write(fileContent);
-          await writable.close();
-          log("System", `ファイルを保存しました: ${handle.name}`);
-          return;
-        } catch (err) {
-          if (err.name === 'AbortError') return;
-          log("System", "標準ダウンロードに切り替えます。");
-        }
-      }
-
+      if (!finalEnglishText && !finalJapaneseText) return;
+      const fileContent = `【英文講義テキスト】\n${finalEnglishText}\n\n【日本語訳】\n${finalJapaneseText}`;
       const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = defaultFileName;
-      document.body.appendChild(a);
+      a.download = `lecture_transcript_${Date.now()}.txt`;
       a.click();
-      document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      log("System", `ダウンロードを実行しました: ${defaultFileName}`);
     }
-
-    document.getElementById('languageSelect').addEventListener('change', (e) => {
-      if (recognition) {
-        recognition.lang = e.target.value;
-        log("Config", `言語変更: ${e.target.value}`);
-      }
-    });
   </script>
 </body>
 </html>
