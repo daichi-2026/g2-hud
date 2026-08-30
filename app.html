@@ -1,446 +1,335 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>リアルタイム講義翻訳 (Deepgram WS v6.1)</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background-color: #f5f5f7; color: #1d1d1f; }
-        .container { max-width: 600px; margin: 0 auto; }
-        .card { background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-        .header-title { display: flex; align-items: center; justify-content: space-between; }
-        .version-tag { background: #5856d6; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
-        label { font-size: 0.85rem; font-weight: bold; color: #6e6e73; display: block; margin-bottom: 4px; }
-        input, select, button { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
-        .key-container { display: flex; gap: 8px; margin-bottom: 12px; }
-        .key-container input { flex: 1; margin-bottom: 0; }
-        .key-container button { width: auto; white-space: nowrap; background-color: #86868b; margin-bottom: 0; }
-        .saved-hint { font-size: 0.75rem; color: #34c759; margin-top: -8px; margin-bottom: 12px; display: none; }
-        .tts-config { background: #f2f2f7; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
-        .tts-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-        .tts-row label { margin-bottom: 0; }
-        .range-container { display: flex; gap: 12px; }
-        .range-item { flex: 1; }
-        .range-item label { font-size: 0.75rem; }
-        button.action-btn { background-color: #0071e3; color: white; font-weight: bold; border: none; cursor: pointer; transition: background 0.2s; margin-top: 8px; }
-        button.action-btn.stop { background-color: #ff3b30; }
-        #status { font-size: 0.9rem; font-weight: bold; color: #86868b; text-align: center; margin-bottom: 12px; }
-        .speech-box { height: 160px; overflow-y: auto; border: 1px solid #e5e5ea; border-radius: 8px; padding: 12px; background: #fafafa; font-size: 0.95rem; line-height: 1.5; }
-        .translated { color: #0071e3; font-weight: 500; }
-        .error-msg { color: #ff3b30; font-size: 0.85rem; text-align: center; margin-top: 4px; }
-        .setting-group { display: flex; gap: 8px; }
-        .setting-group > div { flex: 1; }
-        .debug-box { height: 140px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; word-break: break-all; }
-        .interim { color: #86868b; font-style: italic; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>リアルタイム英語音声認識・講義アシスト (Web Speech API版 v7.0)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      background-color: #111;
+      color: #00FF00;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      height: 100vh;
+      gap: 20px;
+    }
+    .main-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+    .display-box {
+      background-color: #000;
+      border: 2px solid #00FF00;
+      border-radius: 8px;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      flex: 1;
+      overflow: hidden;
+    }
+    .section-title {
+      font-size: 11px;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .content-area {
+      color: #00FF00;
+      font-size: 16px;
+      font-weight: bold;
+      line-height: 1.5;
+      overflow-y: auto;
+      flex: 1;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #050505;
+      padding: 10px;
+      border: 1px solid #222;
+      border-radius: 4px;
+    }
+    .side-panel {
+      width: 380px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      background: #1a1a1a;
+      padding: 15px;
+      border-radius: 8px;
+      border: 1px solid #333;
+      overflow-y: auto;
+      color: #ccc;
+      font-size: 12px;
+    }
+    h2 {
+      color: #00FF00;
+      font-size: 16px;
+      margin: 0 0 10px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .badge {
+      background: #00FF00;
+      color: #000;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: bold;
+    }
+    input, textarea, button, select {
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      width: 100%;
+    }
+    button {
+      background: #00aa00;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+      padding: 10px;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #00dd00;
+      color: #000;
+    }
+    button.stop-btn {
+      background: #cc3333;
+    }
+    button.stop-btn:hover {
+      background: #ff4444;
+      color: #fff;
+    }
+    .status {
+      font-size: 11px;
+      color: #aaa;
+      padding: 6px;
+      background: #080808;
+      border: 1px solid #222;
+      border-radius: 4px;
+    }
+    .log-box {
+      background: #000;
+      border: 1px solid #333;
+      color: #66ff66;
+      font-family: monospace;
+      font-size: 10px;
+      height: 120px;
+      overflow-y: auto;
+      padding: 6px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="header-title">
-        <h2>リアルタイム講義翻訳</h2>
-        <span class="version-tag">v6.1 Filtered</span>
+  <div class="main-container">
+    <div class="display-box">
+      <div class="section-title">【リアルタイム英語文字起こし (Web Speech API)】</div>
+      <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
-    
-    <div class="card">
-        <label for="deepgramKey">Deepgram API Key</label>
-        <div class="key-container">
-            <input type="password" id="deepgramKey" placeholder="Deepgram API Key">
-            <button id="clearDgKeyBtn" type="button">消去</button>
-        </div>
-        <div id="saveDgHint" class="saved-hint">✓ ブラウザに保存されています</div>
+  </div>
 
-        <label for="googleKey">Google Translate API Key</label>
-        <div class="key-container">
-            <input type="password" id="googleKey" placeholder="Google Translate API Key">
-            <button id="clearGkeyBtn" type="button">消去</button>
-        </div>
-        <div id="saveGHint" class="saved-hint">✓ ブラウザに保存されています</div>
-        
-        <div class="setting-group">
-            <div>
-                <label for="sourceLang">話し手の言語</label>
-                <select id="sourceLang">
-                    <option value="en" selected>英語 (English)</option>
-                    <option value="ja">日本語 (Japanese)</option>
-                </select>
-            </div>
-            <div>
-                <label for="targetLang">翻訳先の言語</label>
-                <select id="targetLang">
-                    <option value="ja" selected>日本語 (Japanese)</option>
-                    <option value="en">英語 (English)</option>
-                </select>
-            </div>
-        </div>
+  <div class="side-panel">
+    <h2>
+      <span>英文認識アシスト</span>
+      <span class="badge">v7.0 WebSpeech</span>
+    </h2>
 
-        <div class="tts-config">
-            <div class="tts-row">
-                <label for="ttsEnable">🎧 翻訳音声の読み上げ</label>
-                <input type="checkbox" id="ttsEnable" checked style="width: auto; margin-bottom: 0;">
-            </div>
-            <label for="ttsVoiceSelect" style="font-size:0.75rem;">読み上げ音声エンジン</label>
-            <select id="ttsVoiceSelect" style="padding: 8px; font-size: 0.85rem; margin-bottom: 8px;"></select>
-            
-            <div class="range-container">
-                <div class="range-item">
-                    <label>速度: <span id="ttsRateVal">1.2</span>x</label>
-                    <input type="range" id="ttsRate" min="0.8" max="2.0" step="0.1" value="1.2" oninput="document.getElementById('ttsRateVal').innerText = this.value">
-                </div>
-                <div class="range-item">
-                    <label>ピッチ: <span id="ttsPitchVal">1.0</span></label>
-                    <input type="range" id="ttsPitch" min="0.5" max="1.5" step="0.1" value="1.0" oninput="document.getElementById('ttsPitchVal').innerText = this.value">
-                </div>
-            </div>
-        </div>
-
-        <button id="toggleBtn" class="action-btn">翻訳を開始する</button>
-        <div id="status">停止中</div>
-        <div id="errorLog" class="error-msg"></div>
+    <div>
+      <label style="color:#00FF00; font-weight:bold;">音声認識 言語設定:</label>
+      <select id="languageSelect">
+        <option value="en-US" selected>英語 (米国 - en-US)</option>
+        <option value="en-GB">英語 (英国 - en-GB)</option>
+      </select>
     </div>
 
-    <div class="card">
-        <label>認識された音声 (Deepgram WS 原文)</label>
-        <div id="originalText" class="speech-box"></div>
+    <div style="display:flex; gap:8px;">
+      <button id="startBtn" onclick="startRecognition()">🎤 認識開始</button>
+      <button id="stopBtn" class="stop-btn" onclick="stopRecognition()" disabled>⏹ 停止</button>
     </div>
 
-    <div class="card">
-        <label>リアルタイム翻訳結果 (Google 翻訳)</label>
-        <div id="translatedText" class="speech-box translated"></div>
+    <button onclick="clearTranscript()" style="background:#444;">🗑️ 表示表示のクリア</button>
+
+    <div style="border-top:1px solid #333; margin:4px 0;"></div>
+
+    <div style="font-weight:bold; color:#00FF00;">【動作ステータス】</div>
+    <div id="status" class="status">待機中</div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:4px;">
+      <span style="font-weight:bold; color:#00FF00;">【詳細ログ・除外フィルタ結果】</span>
+      <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
+    <div id="logBox" class="log-box">[System initialized v7.0] Ready.</div>
+  </div>
 
-    <div class="card">
-        <label>システム・通信ログ (Debug Log)</label>
-        <div id="debugLog" class="debug-box"></div>
-    </div>
-</div>
+  <script>
+    let recognition = null;
+    let isRecognizing = false;
+    let finalTranscript = '';
 
-<script>
-    const STORAGE_DG_KEY = 'deepgram_api_key';
-    const STORAGE_G_KEY = 'google_api_key';
-
-    let socket = null;
-    let mediaRecorder = null;
-    let mediaStream = null;
-    let isListening = false;
-    let availableVoices = [];
-    let interimSpan = null;
-
-    const toggleBtn = document.getElementById('toggleBtn');
-    const statusDiv = document.getElementById('status');
-    const errorLog = document.getElementById('errorLog');
-    const debugLog = document.getElementById('debugLog');
-    const originalBox = document.getElementById('originalText');
-    const translatedBox = document.getElementById('translatedText');
-
-    const deepgramKeyInput = document.getElementById('deepgramKey');
-    const googleKeyInput = document.getElementById('googleKey');
-    const clearDgKeyBtn = document.getElementById('clearDgKeyBtn');
-    const clearGkeyBtn = document.getElementById('clearGkeyBtn');
-    const saveDgHint = document.getElementById('saveDgHint');
-    const saveGHint = document.getElementById('saveGHint');
-
-    const sourceLangSelect = document.getElementById('sourceLang');
-    const targetLangSelect = document.getElementById('targetLang');
-    const ttsEnable = document.getElementById('ttsEnable');
-    const ttsVoiceSelect = document.getElementById('ttsVoiceSelect');
-    const ttsRate = document.getElementById('ttsRate');
-    const ttsPitch = document.getElementById('ttsPitch');
-
-    function log(msg, type = 'info') {
-        const time = new Date().toLocaleTimeString();
-        const p = document.createElement('div');
-        p.textContent = `[${time}] ${msg}`;
-        if (type === 'error') p.style.color = '#ff453a';
-        if (type === 'warn') p.style.color = '#ffd60a';
-        debugLog.appendChild(p);
-        debugLog.scrollTop = debugLog.scrollHeight;
+    // 非英語文字（日本語ひらがな・カタカナ・漢字・全角記号等）を完全に除去する正規表現フィルタ
+    function cleanEnglishOnly(text) {
+      if (!text) return '';
+      
+      // 1. 英数字、基本記号(ピリオド, カンマ, クエスチョン等), 半角スペース以外を排除
+      let cleaned = text.replace(/[^a-zA-Z0-9\s.,?!'\"]/g, '');
+      
+      // 2. 連続する余分なスペースを1つに統合
+      cleaned = cleaned.replace(/\s+/g, ' ').trim();
+      
+      return cleaned;
     }
 
-    // 日本語が含まれているかチェックする判定処理
-    function containsJapanese(text) {
-        return /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(text);
+    function log(tag, msg) {
+      const timeStr = new Date().toLocaleTimeString();
+      const logBox = document.getElementById('logBox');
+      logBox.innerText = `[${timeStr}] [${tag}] ${msg}\n` + logBox.innerText;
+      console.log(`[${tag}] ${msg}`);
     }
 
+    function setStatus(msg) {
+      document.getElementById('status').innerText = msg;
+    }
+
+    function initSpeechRecognition() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        setStatus("エラー: お使いのブラウザは Web Speech API に非対応です。(Chrome推奨)");
+        log("Error", "SpeechRecognition API is not supported in this browser.");
+        document.getElementById('startBtn').disabled = true;
+        return false;
+      }
+
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;       // 連続認識を有効化
+      recognition.interimResults = true;   // 途中経過（確定前）も取得
+      
+      const selectedLang = document.getElementById('languageSelect').value;
+      recognition.lang = selectedLang;
+
+      recognition.onstart = () => {
+        isRecognizing = true;
+        setStatus("音声認識中... (マイクON)");
+        log("System", "音声認識サービスが開始されました。");
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('stopBtn').disabled = false;
+      };
+
+      recognition.onresult = (event) => {
+        let interimTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const rawText = event.results[i][0].transcript;
+          
+          // 非英語（日本語等）を完全除去・フィルタリング
+          const filteredText = cleanEnglishOnly(rawText);
+
+          if (!filteredText) {
+            log("Filter", `非英語または雑音としてスキップ: "${rawText}"`);
+            continue;
+          }
+
+          if (event.results[i].isFinal) {
+            finalTranscript += filteredText + ' ';
+            log("Final", filteredText);
+          } else {
+            interimTranscript += filteredText;
+          }
+        }
+
+        // 画面描画更新
+        const display = document.getElementById('transcriptDisplay');
+        display.innerText = finalTranscript + (interimTranscript ? `\n(認識中...: ${interimTranscript})` : '');
+        display.scrollTop = display.scrollHeight;
+      };
+
+      recognition.onerror = (event) => {
+        log("Error", `認識エラーが発生しました: ${event.error}`);
+        if (event.error === 'not-allowed') {
+          setStatus("エラー: マイクの使用が許可されていません。");
+        }
+      };
+
+      recognition.onend = () => {
+        log("System", "音声認識セッションが終了しました。");
+        // 自動再接続（認識が意図せず切れた場合もアクティブ状態なら自動再スタート）
+        if (isRecognizing) {
+          log("System", "自動再接続中...");
+          try {
+            recognition.start();
+          } catch (e) {
+            log("Error", `再接続失敗: ${e.message}`);
+          }
+        } else {
+          setStatus("停止中");
+          document.getElementById('startBtn').disabled = false;
+          document.getElementById('stopBtn').disabled = true;
+        }
+      };
+
+      return true;
+    }
+
+    function startRecognition() {
+      if (!recognition && !initSpeechRecognition()) return;
+
+      isRecognizing = true;
+      try {
+        const selectedLang = document.getElementById('languageSelect').value;
+        recognition.lang = selectedLang;
+        recognition.start();
+      } catch (e) {
+        log("Error", `開始エラー: ${e.message}`);
+      }
+    }
+
+    function stopRecognition() {
+      isRecognizing = false;
+      if (recognition) {
+        recognition.stop();
+      }
+      setStatus("停止処理中...");
+    }
+
+    function clearTranscript() {
+      finalTranscript = '';
+      document.getElementById('transcriptDisplay').innerText = '(音声認識を開始してください...)';
+      log("System", "テキスト表示をクリアしました。");
+    }
+
+    function clearLog() {
+      document.getElementById('logBox').innerText = '[Cleared]';
+    }
+
+    // 言語設定変更時に認識言語を更新
+    document.getElementById('languageSelect').addEventListener('change', (e) => {
+      if (recognition) {
+        recognition.lang = e.target.value;
+        log("Config", `言語設定を変更: ${e.target.value}`);
+      }
+    });
+
+    // 初期化
     window.addEventListener('DOMContentLoaded', () => {
-        log("システム初期化完了 (v6.1 Filtered)");
-        const savedDgKey = localStorage.getItem(STORAGE_DG_KEY);
-        if (savedDgKey) {
-            deepgramKeyInput.value = savedDgKey;
-            saveDgHint.style.display = 'block';
-        }
-        const savedGKey = localStorage.getItem(STORAGE_G_KEY);
-        if (savedGKey) {
-            googleKeyInput.value = savedGKey;
-            saveGHint.style.display = 'block';
-        }
-        initSpeechSynthesis();
+      initSpeechRecognition();
     });
-
-    deepgramKeyInput.addEventListener('input', () => {
-        const val = deepgramKeyInput.value.trim().replace(/\s+/g, '');
-        if (val) {
-            localStorage.setItem(STORAGE_DG_KEY, val);
-            saveDgHint.style.display = 'block';
-        } else {
-            localStorage.removeItem(STORAGE_DG_KEY);
-            saveDgHint.style.display = 'none';
-        }
-    });
-
-    googleKeyInput.addEventListener('input', () => {
-        const val = googleKeyInput.value.trim().replace(/\s+/g, '');
-        if (val) {
-            localStorage.setItem(STORAGE_G_KEY, val);
-            saveGHint.style.display = 'block';
-        } else {
-            localStorage.removeItem(STORAGE_G_KEY);
-            saveGHint.style.display = 'none';
-        }
-    });
-
-    clearDgKeyBtn.addEventListener('click', () => {
-        deepgramKeyInput.value = '';
-        localStorage.removeItem(STORAGE_DG_KEY);
-        saveDgHint.style.display = 'none';
-    });
-
-    clearGkeyBtn.addEventListener('click', () => {
-        googleKeyInput.value = '';
-        localStorage.removeItem(STORAGE_G_KEY);
-        saveGHint.style.display = 'none';
-    });
-
-    function initSpeechSynthesis() {
-        if (!('speechSynthesis' in window)) return;
-
-        function populateVoices() {
-            availableVoices = window.speechSynthesis.getVoices();
-            ttsVoiceSelect.innerHTML = '';
-
-            const targetLang = targetLangSelect.value;
-            const filteredVoices = availableVoices.filter(v => v.lang.startsWith(targetLang));
-
-            if (filteredVoices.length === 0) {
-                const opt = document.createElement('option');
-                opt.value = "";
-                opt.innerText = "標準音声（自動選択）";
-                ttsVoiceSelect.appendChild(opt);
-                return;
-            }
-
-            filteredVoices.forEach((voice) => {
-                const opt = document.createElement('option');
-                opt.value = voice.name;
-                opt.innerText = `${voice.name} (${voice.lang})`;
-                ttsVoiceSelect.appendChild(opt);
-            });
-        }
-
-        populateVoices();
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = populateVoices;
-        }
-        targetLangSelect.addEventListener('change', populateVoices);
-    }
-
-    function speakText(text) {
-        if (!ttsEnable.checked || !text || !('speechSynthesis' in window)) return;
-
-        window.speechSynthesis.cancel();
-
-        const utterance = new SpeechSynthesisUtterance(text);
-        const targetLang = targetLangSelect.value;
-        utterance.lang = targetLang === 'ja' ? 'ja-JP' : 'en-US';
-
-        const selectedVoiceName = ttsVoiceSelect.value;
-        if (selectedVoiceName) {
-            const voiceObj = availableVoices.find(v => v.name === selectedVoiceName);
-            if (voiceObj) utterance.voice = voiceObj;
-        }
-
-        utterance.rate = parseFloat(ttsRate.value) || 1.2;
-        utterance.pitch = parseFloat(ttsPitch.value) || 1.0;
-
-        window.speechSynthesis.speak(utterance);
-    }
-
-    toggleBtn.addEventListener('click', () => {
-        if (!isListening) {
-            startTranslation();
-        } else {
-            stopTranslation();
-        }
-    });
-
-    async function startTranslation() {
-        errorLog.textContent = '';
-        const dgKey = deepgramKeyInput.value.trim().replace(/\s+/g, '');
-        const gKey = googleKeyInput.value.trim().replace(/\s+/g, '');
-
-        if (!dgKey || !gKey) {
-            alert('Deepgram API Key と Google Translate API Key の両方を入力してください。');
-            return;
-        }
-
-        try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            log("マイク接続成功");
-        } catch (e) {
-            log("マイクアクセス拒否: " + e.message, 'error');
-            errorLog.textContent = 'マイクアクセスが拒否されました。';
-            return;
-        }
-
-        const srcLang = sourceLangSelect.value;
-        const model = srcLang === 'ja' ? 'general' : 'nova-2';
-        
-        const wsUrl = `wss://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&smart_format=true&interim_results=true&punctuate=true`;
-
-        log("Deepgram WebSocketへ接続中...");
-        socket = new WebSocket(wsUrl, ['token', dgKey]);
-
-        socket.onopen = () => {
-            log("WebSocket接続確立（ストリーミング開始）");
-            isListening = true;
-            toggleBtn.textContent = '翻訳を停止する';
-            toggleBtn.classList.add('stop');
-            statusDiv.textContent = '音声認識中 (Deepgram WS)...';
-            statusDiv.style.color = '#34c759';
-
-            mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
-            mediaRecorder.addEventListener('dataavailable', event => {
-                if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(event.data);
-                }
-            });
-            mediaRecorder.start(250);
-        };
-
-        socket.onmessage = async (message) => {
-            const received = JSON.parse(message.data);
-            const transcript = received.channel?.alternatives[0]?.transcript;
-            
-            if (!transcript) return;
-
-            const srcLang = sourceLangSelect.value;
-            // 話し手が「英語」に設定されているのに日本語が含まれる場合は完全無視
-            if (srcLang === 'en' && containsJapanese(transcript)) {
-                log(`[無視された日本語音声]: "${transcript}"`, 'warn');
-                return;
-            }
-
-            const isFinal = received.is_final;
-
-            if (isFinal) {
-                clearInterim();
-                log(`[確定英文]: "${transcript}"`);
-                appendMessage(originalBox, transcript);
-
-                const translated = await translateText(transcript);
-                log(`[Google 翻訳結果]: "${translated}"`);
-                appendMessage(translatedBox, translated);
-                speakText(translated);
-            } else {
-                showInterim(transcript);
-            }
-        };
-
-        socket.onerror = (error) => {
-            log("WebSocket エラー発生: " + JSON.stringify(error), 'error');
-            errorLog.textContent = 'Deepgram WebSocket通信エラー。APIキーを確認してください。';
-        };
-
-        socket.onclose = () => {
-            log("WebSocket 切断");
-            if (isListening) {
-                stopTranslation();
-            }
-        };
-    }
-
-    function stopTranslation() {
-        isListening = false;
-        toggleBtn.textContent = '翻訳を開始する';
-        toggleBtn.classList.remove('stop');
-        statusDiv.textContent = '停止中';
-        statusDiv.style.color = '#86868b';
-
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-        }
-
-        if (socket) {
-            if (socket.readyState === WebSocket.OPEN) {
-                socket.close();
-            }
-            socket = null;
-        }
-
-        if (mediaStream) {
-            mediaStream.getTracks().forEach(track => track.stop());
-            mediaStream = null;
-        }
-
-        if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel();
-        }
-
-        clearInterim();
-        log("システム停止完了");
-    }
-
-    function showInterim(text) {
-        if (!interimSpan) {
-            interimSpan = document.createElement('span');
-            interimSpan.className = 'interim';
-            originalBox.appendChild(interimSpan);
-        }
-        interimSpan.textContent = text;
-        originalBox.scrollTop = originalBox.scrollHeight;
-    }
-
-    function clearInterim() {
-        if (interimSpan) {
-            interimSpan.remove();
-            interimSpan = null;
-        }
-    }
-
-    async function translateText(text) {
-        const apiKey = googleKeyInput.value.trim().replace(/\s+/g, '');
-        const targetLang = targetLangSelect.value;
-
-        if (!apiKey) return '[APIキー未入力] ' + text;
-
-        const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
-
-        try {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ q: text, target: targetLang })
-            });
-            const data = await response.json();
-            if (data.data && data.data.translations.length > 0) {
-                return data.data.translations[0].translatedText;
-            }
-            log("Google API エラー: " + JSON.stringify(data), 'error');
-            return '[翻訳エラー]';
-        } catch (error) {
-            log("Google 通信エラー: " + error.message, 'error');
-            return '[通信エラー]';
-        }
-    }
-
-    function appendMessage(element, text) {
-        const p = document.createElement('p');
-        p.style.margin = '0 0 8px 0';
-        p.textContent = text;
-        element.appendChild(p);
-        element.scrollTop = element.scrollHeight;
-    }
-</script>
-
+  </script>
 </body>
 </html>
