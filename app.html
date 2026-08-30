@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v8.9 高速同期版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v9.0 超高速ストリーム版)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -58,7 +58,7 @@
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
     <div class="display-box japanese">
-      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 高速同期版)】</div>
+      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 超高速即時訳)】</div>
       <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
     </div>
   </div>
@@ -66,7 +66,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v8.9</span>
+      <span class="badge">v9.0</span>
     </h2>
 
     <div>
@@ -111,7 +111,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v8.9] Fast Synchronized Engine Ready.</div>
+    <div id="logBox" class="log-box">[System v9.0] Ultra Fast Stream Engine Ready.</div>
   </div>
 
   <script>
@@ -119,10 +119,6 @@
     let isRecognizing = false;
     let finalEnglishText = '';
     let finalJapaneseText = '';
-    
-    let pendingEnglishBuffer = '';
-    let isTranslating = false;
-    let translateTimer = null;
 
     let ttsQueue = [];
     let isTtsActive = false;
@@ -165,33 +161,33 @@
       if (statusEl) statusEl.innerText = msg;
     }
 
-    async function processTranslationQueue() {
-      if (isTranslating || !pendingEnglishBuffer.trim()) return;
-
+    // 確定した1文ごとに即時非同期リクエストを送る
+    async function translateChunkImmediately(englishChunk) {
       const apiKey = document.getElementById('apiKey').value.trim();
       let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       
-      if (!apiKey) return;
-
-      const textToTranslate = pendingEnglishBuffer.trim();
-      pendingEnglishBuffer = ''; 
-      isTranslating = true;
+      if (!apiKey || !englishChunk.trim()) return;
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-      const prompt = `Task: Translate this spoken English lecture paragraph into natural Japanese.
-Rules: Output ONLY Japanese text. No notes, no markdown, no explanations.
 
-English:
-"${textToTranslate}"`;
+      const requestData = {
+        systemInstruction: {
+          parts: [{ text: "You are an instant live translator. Translate the given English spoken sentence into natural Japanese. Output ONLY the Japanese translation. Absolutely no English, no thoughts, no typos notes, and no markdown." }]
+        },
+        contents: [{
+          parts: [{ text: englishChunk }]
+        }],
+        generationConfig: {
+          temperature: 0.0,
+          maxOutputTokens: 200
+        }
+      };
 
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 512 }
-          })
+          body: JSON.stringify(requestData)
         });
 
         if (response.ok) {
@@ -200,7 +196,7 @@ English:
           translatedText = translatedText.replace(/^[`"'\s]+|[`"'\s]+$/g, '');
 
           if (translatedText) {
-            finalJapaneseText += translatedText + '\n\n';
+            finalJapaneseText += translatedText + '\n';
             renderJapanese();
 
             if (isTtsActive) {
@@ -213,13 +209,7 @@ English:
           log("Gemini Error", errData.error?.message || response.statusText);
         }
       } catch (e) {
-        log("Error", `Gemini API通信エラー: ${e.message}`);
-      } finally {
-        isTranslating = false;
-        // バッファに残っている英文があれば即時処理
-        if (pendingEnglishBuffer.trim()) {
-          processTranslationQueue();
-        }
+        log("Error", `API通信エラー: ${e.message}`);
       }
     }
 
@@ -317,15 +307,9 @@ English:
 
           if (event.results[i].isFinal) {
             finalEnglishText += filteredText + '. ';
-            pendingEnglishBuffer += filteredText + '. ';
-
-            // 1.5秒間無音が続いたか、文章が一定長溜まったら翻訳を実行
-            clearTimeout(translateTimer);
-            if (pendingEnglishBuffer.length > 100) {
-              processTranslationQueue();
-            } else {
-              translateTimer = setTimeout(processTranslationQueue, 1500);
-            }
+            
+            // 確定文を即時・非同期でGeminiへ送信
+            translateChunkImmediately(filteredText);
           } else {
             currentInterimEn += filteredText;
           }
@@ -377,7 +361,6 @@ English:
       stopSpeaking();
       finalEnglishText = '';
       finalJapaneseText = '';
-      pendingEnglishBuffer = '';
       document.getElementById('transcriptDisplay').innerText = '(音声認識を開始してください...)';
       document.getElementById('translationDisplay').innerText = '(翻訳結果がここに表示されます...)';
     }
