@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v8.0 Gemini AI 文脈補正版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v8.1 Gemini 修正版)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -146,7 +146,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v8.0 Gemini</span>
+      <span class="badge">v8.1 Gemini</span>
     </h2>
 
     <div>
@@ -186,7 +186,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v8.0] Gemini AI Correction Translation Ready.</div>
+    <div id="logBox" class="log-box">[System v8.1] Gemini 2.5 Engine Ready.</div>
   </div>
 
   <script>
@@ -196,7 +196,6 @@
     let finalJapaneseText = '';
     let interimJapaneseText = '';
     
-    // 朗読（TTS）キュー制御用変数
     let ttsQueue = [];
     let isTtsActive = false;
     let isSpeakingNow = false;
@@ -240,12 +239,13 @@
       if (wakeLock !== null) { wakeLock.release(); wakeLock = null; }
     }
 
-    // --- Gemini API による補正・意訳処理 ---
+    // --- Gemini API 呼び出し (v8.1 最新モデル指定へ修正) ---
     async function fetchGeminiTranslation(text) {
       const apiKey = document.getElementById('apiKey').value.trim();
       if (!apiKey || !text.trim()) return '';
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      // モデルエンドポイントを gemini-2.5-flash へ更新
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
       
       const prompt = `あなたはプロの即時通訳者です。
 以下は英語の講義やスピーチのリアルタイム音声認識テキストです。音声認識の誤り（単語の間違いや同音異義語の誤変換など）が含まれている可能性があります。
@@ -291,8 +291,6 @@
       jaDisplay.innerHTML = html || '(翻訳結果がここに表示されます...)';
       jaDisplay.scrollTop = jaDisplay.scrollHeight;
     }
-
-    // --- リアルタイム連続朗読エンジン ---
 
     function toggleContinuousTTS() {
       if (isTtsActive) {
@@ -362,8 +360,6 @@
       log("TTS", "朗読を停止しました");
     }
 
-    // --- 音声認識処理 ---
-
     function initSpeechRecognition() {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
@@ -424,7 +420,7 @@
               interimJapaneseText = jaText;
               renderJapanese();
             }
-          }, 400); // LLM呼び出し用にデバウンス間隔を400msに調整
+          }, 400);
         }
       };
 
