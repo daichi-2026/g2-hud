@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>リアルタイム講義翻訳 (G2 Deepgram移植版)</title>
+    <title>リアルタイム講義翻訳 (G2 Deepgram移植版 v4.1)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background-color: #f5f5f7; color: #1d1d1f; }
         .container { max-width: 600px; margin: 0 auto; }
         .card { background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .header-title { display: flex; align-items: center; justify-content: space-between; }
-        .version-tag { background: #34c759; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+        .version-tag { background: #0071e3; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
         label { font-size: 0.85rem; font-weight: bold; color: #6e6e73; display: block; margin-bottom: 4px; }
         input, select, button { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
         .key-container { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -30,7 +30,7 @@
         .error-msg { color: #ff3b30; font-size: 0.85rem; text-align: center; margin-top: 4px; }
         .setting-group { display: flex; gap: 8px; }
         .setting-group > div { flex: 1; }
-        .debug-box { height: 120px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; }
+        .debug-box { height: 160px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; word-break: break-all; }
     </style>
 </head>
 <body>
@@ -38,7 +38,7 @@
 <div class="container">
     <div class="header-title">
         <h2>リアルタイム講義翻訳</h2>
-        <span class="version-tag">v4.0 (G2 REST Ported)</span>
+        <span class="version-tag">v4.1 Debug</span>
     </div>
     
     <div class="card">
@@ -128,6 +128,7 @@
     let activePcmChunks = [];
     let activeTotalBytes = 0;
     let chunkTimer = null;
+    let currentSampleRate = 16000;
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
@@ -161,7 +162,7 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        log("システム初期化完了 (v4.0 - G2 REST Logic)");
+        log("システム初期化完了 (v4.1 Debug)");
         const savedDgKey = localStorage.getItem(STORAGE_DG_KEY);
         if (savedDgKey) {
             deepgramKeyInput.value = savedDgKey;
@@ -263,9 +264,8 @@
         window.speechSynthesis.speak(utterance);
     }
 
-    // --- EVEN G2 移植関数: WAVヘッダー作成 ---
-    function createWavBlob(chunks, dataSize) {
-        const sampleRate = 16000;
+    // WAVヘッダー生成
+    function createWavBlob(chunks, dataSize, sampleRate) {
         const numChannels = 1;
         const bitsPerSample = 16;
         
@@ -302,7 +302,7 @@
         }
     }
 
-    // --- EVEN G2 移植関数: Deepgram POST送信 ---
+    // Deepgram POST 送信 (詳細デバッグ表示)
     async function transcribeWithDeepgram(wavBlob) {
         const deepgramKey = deepgramKeyInput.value.trim().replace(/\s+/g, '');
         if (!deepgramKey) return "";
@@ -322,13 +322,19 @@
             });
 
             if (!response.ok) {
-                log(`Deepgram APIエラー: Status ${response.status}`, 'error');
+                const errorText = await response.text();
+                log(`Deepgram エラー [${response.status}]: ${errorText}`, 'error');
                 return "";
             }
+            
             const data = await response.json();
-            return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
+            const transcript = data.results?.channels[0]?.alternatives[0]?.transcript || '';
+            if (!transcript) {
+                log(`Deepgram 返答あり (音声認識テキストなし/無音)`, 'warn');
+            }
+            return transcript.trim();
         } catch (e) {
-            log(`Deepgram通信エラー: ${e.message}`, 'error');
+            log(`Deepgram 通信例外: ${e.message}`, 'error');
             return "";
         }
     }
@@ -354,9 +360,9 @@
         log("マイク許可を取得中...");
         try {
             mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            log("マイク接続完了");
+            log("マイク接続成功");
         } catch (e) {
-            log("マイク拒否: " + e.message, 'error');
+            log("マイクアクセス拒否: " + e.message, 'error');
             errorLog.textContent = 'マイクアクセスが拒否されました。';
             return;
         }
@@ -371,9 +377,11 @@
     }
 
     function startAudioProcessing(stream) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        currentSampleRate = audioContext.sampleRate;
+        log(`AudioContext起動 (SampleRate: ${currentSampleRate}Hz)`);
+
         const source = audioContext.createMediaStreamSource(stream);
-        
         processor = audioContext.createScriptProcessor(4096, 1, 1);
 
         processor.onaudioprocess = (e) => {
@@ -391,18 +399,16 @@
             activePcmChunks.push(uint8Chunk);
             activeTotalBytes += uint8Chunk.byteLength;
 
-            // 1.5秒ごとにバッファした音声をDeepgramへPOST送信
             if (!chunkTimer) {
                 chunkTimer = setTimeout(() => {
                     chunkTimer = null;
                     processQueue();
-                }, 1500);
+                }, 2000); // 2秒ごとに送信
             }
         };
 
         source.connect(processor);
         processor.connect(audioContext.destination);
-        log("16kHz 音声プロセッサ起動");
     }
 
     async function processQueue() {
@@ -416,24 +422,24 @@
         activeTotalBytes = 0;
 
         try {
-            if (bytesToProcess >= 1600) {
-                log("Deepgramへ音声データ送信中...");
-                const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
+            if (bytesToProcess > 3200) {
+                log(`Deepgramへ音声データ送信中 (${bytesToProcess} bytes)...`);
+                const wavBlob = createWavBlob(chunksToProcess, bytesToProcess, currentSampleRate);
                 const transcript = await transcribeWithDeepgram(wavBlob);
 
                 if (transcript) {
-                    log(`[Deepgram確定]: "${transcript}"`);
+                    log(`[Deepgram 認識結果]: "${transcript}"`);
                     appendMessage(originalBox, transcript);
 
                     log("Google翻訳実行中...");
                     const translated = await translateText(transcript);
-                    log(`[Google翻訳]: "${translated}"`);
+                    log(`[Google 翻訳結果]: "${translated}"`);
                     appendMessage(translatedBox, translated);
                     speakText(translated);
                 }
             }
         } catch (e) {
-            log("キュー処理エラー: " + e.message, 'error');
+            log("処理エラー: " + e.message, 'error');
         } finally {
             isProcessing = false;
         }
@@ -483,7 +489,7 @@
             if (data.data && data.data.translations.length > 0) {
                 return data.data.translations[0].translatedText;
             }
-            log("Google APIエラー: " + JSON.stringify(data), 'error');
+            log("Google API エラー: " + JSON.stringify(data), 'error');
             return '[翻訳エラー]';
         } catch (error) {
             log("Google 通信エラー: " + error.message, 'error');
