@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v7.7 リアルタイム連続朗読版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v8.0 Gemini AI 文脈補正版)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -138,7 +138,7 @@
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
     <div class="display-box japanese">
-      <div class="section-title">【リアルタイム日本語訳 (文脈維持・安全上書き版)】</div>
+      <div class="section-title">【リアルタイム日本語訳 (Gemini AI 誤認識補正版)】</div>
       <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
     </div>
   </div>
@@ -146,11 +146,11 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v7.7</span>
+      <span class="badge">v8.0 Gemini</span>
     </h2>
 
     <div>
-      <label style="color:#00FF00; font-weight:bold;">Google Cloud Translation API Key:</label>
+      <label style="color:#00FF00; font-weight:bold;">Gemini API Key (Google AI Studio):</label>
       <input type="password" id="apiKey" placeholder="AIzaSy...">
     </div>
 
@@ -186,7 +186,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v7.7] Continuous TTS Engine Ready.</div>
+    <div id="logBox" class="log-box">[System v8.0] Gemini AI Correction Translation Ready.</div>
   </div>
 
   <script>
@@ -205,13 +205,13 @@
     let translateTimer = null;
 
     window.addEventListener('DOMContentLoaded', () => {
-      const savedKey = localStorage.getItem('gcloud_translation_key');
+      const savedKey = localStorage.getItem('gemini_api_key');
       if (savedKey) document.getElementById('apiKey').value = savedKey;
       initSpeechRecognition();
     });
 
     document.getElementById('apiKey').addEventListener('change', (e) => {
-      localStorage.setItem('gcloud_translation_key', e.target.value.trim());
+      localStorage.setItem('gemini_api_key', e.target.value.trim());
     });
 
     function cleanEnglishOnly(text) {
@@ -240,23 +240,44 @@
       if (wakeLock !== null) { wakeLock.release(); wakeLock = null; }
     }
 
-    async function fetchTranslation(text) {
+    // --- Gemini API による補正・意訳処理 ---
+    async function fetchGeminiTranslation(text) {
       const apiKey = document.getElementById('apiKey').value.trim();
       if (!apiKey || !text.trim()) return '';
 
-      const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+      
+      const prompt = `あなたはプロの即時通訳者です。
+以下は英語の講義やスピーチのリアルタイム音声認識テキストです。音声認識の誤り（単語の間違いや同音異義語の誤変換など）が含まれている可能性があります。
+
+指示:
+1. 前後の文脈から音声認識エラーを自動補正してください。
+2. 補正した意味に基づいて、自然で読みやすい日本語の講義和訳のみを出力してください。
+3. 箇条書きや補足説明、挨拶、思考プロセスなどは一切含めず、翻訳結果の日本語文字列のみを出力してください。
+
+入力英文:
+"${text}"`;
+
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: text, source: 'en', target: 'ja', format: 'text' })
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.2, maxOutputTokens: 256 }
+          })
         });
+
         if (response.ok) {
           const data = await response.json();
-          return data.data?.translations[0]?.translatedText || '';
+          const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          return translatedText.trim();
+        } else {
+          const errData = await response.json();
+          log("Gemini Error", errData.error?.message || response.statusText);
         }
       } catch (e) {
-        log("Error", `通信エラー: ${e.message}`);
+        log("Error", `Gemini API通信エラー: ${e.message}`);
       }
       return '';
     }
@@ -285,9 +306,8 @@
       if (!('speechSynthesis' in window)) return;
       
       isTtsActive = true;
-      ttsQueue = []; // キューをクリア
+      ttsQueue = [];
       
-      // 直近の確定テキストがあれば最初の一文としてキューへ追加
       const lines = finalJapaneseText.trim().split('\n').filter(l => l.trim().length > 0);
       if (lines.length > 0) {
         ttsQueue.push(lines[lines.length - 1]);
@@ -314,7 +334,6 @@
 
       utterance.onend = () => {
         isSpeakingNow = false;
-        // 読上げ完了後、次に溜まっているキューを処理
         if (isTtsActive) {
           processTtsQueue();
         }
@@ -376,13 +395,12 @@
           if (event.results[i].isFinal) {
             finalEnglishText += filteredText + '. ';
             
-            fetchTranslation(filteredText).then(jaText => {
+            fetchGeminiTranslation(filteredText).then(jaText => {
               if (jaText) {
                 finalJapaneseText += jaText + '\n';
                 interimJapaneseText = '';
                 renderJapanese();
 
-                // 連続朗読モードがONなら、新しい和訳を即座にキューへ追加
                 if (isTtsActive) {
                   ttsQueue.push(jaText);
                   processTtsQueue();
@@ -401,12 +419,12 @@
         if (currentInterimEn) {
           clearTimeout(translateTimer);
           translateTimer = setTimeout(async () => {
-            const jaText = await fetchTranslation(currentInterimEn);
+            const jaText = await fetchGeminiTranslation(currentInterimEn);
             if (jaText) {
               interimJapaneseText = jaText;
               renderJapanese();
             }
-          }, 300);
+          }, 400); // LLM呼び出し用にデバウンス間隔を400msに調整
         }
       };
 
