@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v8.6 スマートバッファ版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v8.7 リアルタイム版)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -58,7 +58,7 @@
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
     <div class="display-box japanese">
-      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 12秒バッファ補正版)】</div>
+      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 高速補正版)】</div>
       <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
     </div>
   </div>
@@ -66,7 +66,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v8.6</span>
+      <span class="badge">v8.7</span>
     </h2>
 
     <div>
@@ -92,8 +92,6 @@
       <button id="stopBtn" class="stop-btn" onclick="stopRecognition()" disabled>⏹ 停止</button>
     </div>
 
-    <button onclick="forceTranslateBuffer()" style="background:#e67e22; color:#fff;">⚡ 今すぐ溜まった分を翻訳</button>
-
     <div style="display:flex; gap:8px;">
       <button id="ttsBtn" onclick="toggleContinuousTTS()" style="background:#00aaff; color:#000;">🔊 最新から連続朗読</button>
       <button onclick="stopSpeaking()" style="background:#882222; width:40%;">⏹ 読上停止</button>
@@ -113,7 +111,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v8.6] 12s Smart Buffer Engine Ready.</div>
+    <div id="logBox" class="log-box">[System v8.7] Tier 1 High-Speed Stream Ready.</div>
   </div>
 
   <script>
@@ -122,11 +120,6 @@
     let finalEnglishText = '';
     let finalJapaneseText = '';
     
-    // バッファ管理変数
-    let pendingEnglishBuffer = '';
-    let bufferTimer = null;
-    const BUFFER_INTERVAL_MS = 12500; // 安全のため12.5秒間隔に設定
-
     let ttsQueue = [];
     let isTtsActive = false;
     let isSpeakingNow = false;
@@ -176,7 +169,6 @@
       if (wakeLock !== null) { wakeLock.release(); wakeLock = null; }
     }
 
-    // --- Gemini API 呼び出し ---
     async function fetchGeminiTranslation(text) {
       const apiKey = document.getElementById('apiKey').value.trim();
       let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
@@ -186,12 +178,7 @@
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
       
       const prompt = `あなたはプロの即時通訳者です。
-以下は英語の講義やスピーチのリアルタイム音声認識テキストです。音声認識の誤り（単語の間違いや同音異義語の誤変換など）が含まれている可能性があります。
-
-指示:
-1. 前後の文脈から音声認識エラーを自動補正してください。
-2. 補正した意味に基づいて、自然で読みやすい日本語の講義和訳のみを出力してください。
-3. 箇条書きや補足説明、挨拶、思考プロセスなどは一切含めず、翻訳結果の日本語文字列のみを出力してください。
+以下は英語の講義音声認識テキストです。誤認識を文脈から補正し、自然な日本語講義訳のみを出力してください。余計な解説は不要です。
 
 入力英文:
 "${text}"`;
@@ -217,36 +204,6 @@
         log("Error", `Gemini API通信エラー: ${e.message}`);
       }
       return '';
-    }
-
-    // バッファに溜まった英文をまとめて翻訳に送る処理
-    async function processBuffer() {
-      if (!pendingEnglishBuffer.trim()) return;
-
-      const textToTranslate = pendingEnglishBuffer.trim();
-      pendingEnglishBuffer = ''; // 送信後にクリア
-
-      log("Buffer", `翻訳リクエスト送信中 (${textToTranslate.length} 文字)`);
-      const jaText = await fetchGeminiTranslation(textToTranslate);
-
-      if (jaText) {
-        finalJapaneseText += jaText + '\n';
-        renderJapanese();
-
-        if (isTtsActive) {
-          ttsQueue.push(jaText);
-          processTtsQueue();
-        }
-      }
-    }
-
-    // 手動で即座にバッファを処理する関数
-    function forceTranslateBuffer() {
-      if (pendingEnglishBuffer.trim()) {
-        processBuffer();
-      } else {
-        log("Buffer", "溜まっている英文はありません");
-      }
     }
 
     function renderJapanese() {
@@ -322,13 +279,10 @@
 
       recognition.onstart = () => {
         isRecognizing = true;
-        setStatus("音声認識中... (12.5秒周期で自動翻訳)");
+        setStatus("音声認識中... (マイクON)");
         document.getElementById('startBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
         requestWakeLock();
-
-        // 12.5秒周期のタイマーを開始
-        bufferTimer = setInterval(processBuffer, BUFFER_INTERVAL_MS);
       };
 
       recognition.onresult = (event) => {
@@ -341,7 +295,19 @@
 
           if (event.results[i].isFinal) {
             finalEnglishText += filteredText + '. ';
-            pendingEnglishBuffer += filteredText + '. '; // バッファに溜め込む
+            
+            // 確定文章が発生するたびに即時翻訳呼び出し
+            fetchGeminiTranslation(filteredText).then(jaText => {
+              if (jaText) {
+                finalJapaneseText += jaText + '\n';
+                renderJapanese();
+
+                if (isTtsActive) {
+                  ttsQueue.push(jaText);
+                  processTtsQueue();
+                }
+              }
+            });
           } else {
             currentInterimEn += filteredText;
           }
@@ -361,7 +327,6 @@
           setStatus("停止中");
           document.getElementById('startBtn').disabled = false;
           document.getElementById('stopBtn').disabled = true;
-          if (bufferTimer) clearInterval(bufferTimer);
           releaseWakeLock();
         }
       };
@@ -377,8 +342,6 @@
 
     function stopRecognition() {
       isRecognizing = false;
-      if (bufferTimer) clearInterval(bufferTimer);
-      processBuffer(); // 停止時に残りのバッファを送信
       if (recognition) recognition.stop();
       stopSpeaking();
       setStatus("停止処理中...");
@@ -388,7 +351,6 @@
       stopSpeaking();
       finalEnglishText = '';
       finalJapaneseText = '';
-      pendingEnglishBuffer = '';
       document.getElementById('transcriptDisplay').innerText = '(音声認識を開始してください...)';
       document.getElementById('translationDisplay').innerText = '(翻訳結果がここに表示されます...)';
     }
@@ -400,7 +362,7 @@
     async function downloadTranscript() {
       if (!finalEnglishText && !finalJapaneseText) return;
       const fileContent = `【英文講義テキスト】\n${finalEnglishText}\n\n【日本語訳】\n${finalJapaneseText}`;
-      const blob = new Blob trophy = new Blob([fileContent], { type: 'text/plain;charset=utf-8;' });
+      const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
