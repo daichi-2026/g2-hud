@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v8.3 Gemini モデル可変版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v8.6 スマートバッファ版)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -16,129 +16,49 @@
       height: 100vh;
       gap: 15px;
     }
-    .main-container {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
+    .main-container { flex: 1; display: flex; flex-direction: column; gap: 12px; }
     .display-box {
       background-color: #000;
       border: 2px solid #00FF00;
       border-radius: 8px;
       padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      flex: 1;
-      overflow: hidden;
+      display: flex; flex-direction: column; gap: 6px; flex: 1; overflow: hidden;
     }
     .display-box.japanese { border-color: #00FFFF; }
-    .section-title {
-      font-size: 11px;
-      color: #888;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
+    .section-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
     .display-box.japanese .section-title { color: #00FFFF; }
     .content-area {
-      color: #00FF00;
-      font-size: 15px;
-      font-weight: bold;
-      line-height: 1.5;
-      overflow-y: auto;
-      flex: 1;
-      white-space: pre-wrap;
-      word-break: break-word;
-      background: #050505;
-      padding: 10px;
-      border: 1px solid #222;
-      border-radius: 4px;
+      color: #00FF00; font-size: 15px; font-weight: bold; line-height: 1.5;
+      overflow-y: auto; flex: 1; white-space: pre-wrap; word-break: break-word;
+      background: #050505; padding: 10px; border: 1px solid #222; border-radius: 4px;
     }
     .display-box.japanese .content-area { color: #FFFFFF; }
     .interim-text { color: #888888; font-style: italic; display: block; margin-top: 4px; }
     .side-panel {
-      width: 360px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      background: #1a1a1a;
-      padding: 12px;
-      border-radius: 8px;
-      border: 1px solid #333;
-      overflow-y: auto;
-      color: #ccc;
-      font-size: 12px;
+      width: 360px; display: flex; flex-direction: column; gap: 10px;
+      background: #1a1a1a; padding: 12px; border-radius: 8px; border: 1px solid #333;
+      overflow-y: auto; color: #ccc; font-size: 12px;
     }
-    h2 {
-      color: #00FF00;
-      font-size: 15px;
-      margin: 0 0 6px 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .badge {
-      background: #00FF00;
-      color: #000;
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 10px;
-      font-weight: bold;
-    }
-    input, select, button {
-      background: #222;
-      border: 1px solid #444;
-      color: #fff;
-      padding: 7px;
-      border-radius: 4px;
-      font-size: 12px;
-      width: 100%;
-    }
-    button {
-      background: #00aa00;
-      color: #fff;
-      font-weight: bold;
-      cursor: pointer;
-      border: none;
-      padding: 9px;
-      transition: background 0.2s;
-    }
+    h2 { color: #00FF00; font-size: 15px; margin: 0 0 6px 0; display: flex; justify-content: space-between; align-items: center; }
+    .badge { background: #00FF00; color: #000; font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
+    input, select, button { background: #222; border: 1px solid #444; color: #fff; padding: 7px; border-radius: 4px; font-size: 12px; width: 100%; }
+    button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 9px; transition: background 0.2s; }
     button:hover { background: #00dd00; color: #000; }
     button.stop-btn { background: #cc3333; }
     button.stop-btn:hover { background: #ff4444; color: #fff; }
-    .status {
-      font-size: 11px;
-      color: #aaa;
-      padding: 6px;
-      background: #080808;
-      border: 1px solid #222;
-      border-radius: 4px;
-    }
-    .log-box {
-      background: #000;
-      border: 1px solid #333;
-      color: #66ff66;
-      font-family: monospace;
-      font-size: 10px;
-      height: 100px;
-      overflow-y: auto;
-      padding: 6px;
-      border-radius: 4px;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
+    .status { font-size: 11px; color: #aaa; padding: 6px; background: #080808; border: 1px solid #222; border-radius: 4px; }
+    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 10px; height: 100px; overflow-y: auto; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
 <body>
 
   <div class="main-container">
     <div class="display-box">
-      <div class="section-title">【リアルタイム英語文字起こし (Web Speech API)】</div>
+      <div class="section-title">【リアルタイム英語文字起こし (WEB SPEECH API)】</div>
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
     <div class="display-box japanese">
-      <div class="section-title">【リアルタイム日本語訳 (Gemini AI 誤認識補正版)】</div>
+      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 12秒バッファ補正版)】</div>
       <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
     </div>
   </div>
@@ -146,7 +66,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v8.3 Gemini</span>
+      <span class="badge">v8.6</span>
     </h2>
 
     <div>
@@ -156,8 +76,7 @@
 
     <div>
       <label style="color:#00FF00; font-weight:bold;">Gemini モデル指定:</label>
-      <input type="text" id="modelInput" value="gemini-flash" placeholder="例: gemini-flash, gemini-3.6-flash">
-      <span style="font-size:10px; color:#888;">※通常は「gemini-flash」（自動最新型）のままでOKです</span>
+      <input type="text" id="modelInput" value="gemini-3.6-flash" placeholder="gemini-3.6-flash">
     </div>
 
     <div>
@@ -172,6 +91,8 @@
       <button id="startBtn" onclick="startRecognition()">🎤 認識開始</button>
       <button id="stopBtn" class="stop-btn" onclick="stopRecognition()" disabled>⏹ 停止</button>
     </div>
+
+    <button onclick="forceTranslateBuffer()" style="background:#e67e22; color:#fff;">⚡ 今すぐ溜まった分を翻訳</button>
 
     <div style="display:flex; gap:8px;">
       <button id="ttsBtn" onclick="toggleContinuousTTS()" style="background:#00aaff; color:#000;">🔊 最新から連続朗読</button>
@@ -192,7 +113,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v8.3] Dynamic Model Engine Ready.</div>
+    <div id="logBox" class="log-box">[System v8.6] 12s Smart Buffer Engine Ready.</div>
   </div>
 
   <script>
@@ -200,14 +121,16 @@
     let isRecognizing = false;
     let finalEnglishText = '';
     let finalJapaneseText = '';
-    let interimJapaneseText = '';
     
+    // バッファ管理変数
+    let pendingEnglishBuffer = '';
+    let bufferTimer = null;
+    const BUFFER_INTERVAL_MS = 12500; // 安全のため12.5秒間隔に設定
+
     let ttsQueue = [];
     let isTtsActive = false;
     let isSpeakingNow = false;
-
     let wakeLock = null;
-    let translateTimer = null;
 
     window.addEventListener('DOMContentLoaded', () => {
       const savedKey = localStorage.getItem('gemini_api_key');
@@ -253,10 +176,10 @@
       if (wakeLock !== null) { wakeLock.release(); wakeLock = null; }
     }
 
-    // --- Gemini API 呼び出し (画面入力のモデル名を使用) ---
+    // --- Gemini API 呼び出し ---
     async function fetchGeminiTranslation(text) {
       const apiKey = document.getElementById('apiKey').value.trim();
-      let modelName = document.getElementById('modelInput').value.trim() || 'gemini-flash';
+      let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       
       if (!apiKey || !text.trim()) return '';
 
@@ -285,8 +208,7 @@
 
         if (response.ok) {
           const data = await response.json();
-          const translatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          return translatedText.trim();
+          return (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
         } else {
           const errData = await response.json();
           log("Gemini Error", errData.error?.message || response.statusText);
@@ -297,47 +219,62 @@
       return '';
     }
 
+    // バッファに溜まった英文をまとめて翻訳に送る処理
+    async function processBuffer() {
+      if (!pendingEnglishBuffer.trim()) return;
+
+      const textToTranslate = pendingEnglishBuffer.trim();
+      pendingEnglishBuffer = ''; // 送信後にクリア
+
+      log("Buffer", `翻訳リクエスト送信中 (${textToTranslate.length} 文字)`);
+      const jaText = await fetchGeminiTranslation(textToTranslate);
+
+      if (jaText) {
+        finalJapaneseText += jaText + '\n';
+        renderJapanese();
+
+        if (isTtsActive) {
+          ttsQueue.push(jaText);
+          processTtsQueue();
+        }
+      }
+    }
+
+    // 手動で即座にバッファを処理する関数
+    function forceTranslateBuffer() {
+      if (pendingEnglishBuffer.trim()) {
+        processBuffer();
+      } else {
+        log("Buffer", "溜まっている英文はありません");
+      }
+    }
+
     function renderJapanese() {
       const jaDisplay = document.getElementById('translationDisplay');
-      let html = finalJapaneseText;
-      if (interimJapaneseText) {
-        html += `<span class="interim-text">💬 ${interimJapaneseText}</span>`;
-      }
-      jaDisplay.innerHTML = html || '(翻訳結果がここに表示されます...)';
+      jaDisplay.innerHTML = finalJapaneseText || '(翻訳結果がここに表示されます...)';
       jaDisplay.scrollTop = jaDisplay.scrollHeight;
     }
 
     function toggleContinuousTTS() {
-      if (isTtsActive) {
-        stopSpeaking();
-      } else {
-        startContinuousTTS();
-      }
+      if (isTtsActive) stopSpeaking();
+      else startContinuousTTS();
     }
 
     function startContinuousTTS() {
       if (!('speechSynthesis' in window)) return;
-      
       isTtsActive = true;
       ttsQueue = [];
-      
       const lines = finalJapaneseText.trim().split('\n').filter(l => l.trim().length > 0);
-      if (lines.length > 0) {
-        ttsQueue.push(lines[lines.length - 1]);
-      } else if (interimJapaneseText.trim()) {
-        ttsQueue.push(interimJapaneseText.trim());
-      }
+      if (lines.length > 0) ttsQueue.push(lines[lines.length - 1]);
 
       document.getElementById('ttsBtn').innerText = "🔊 連続朗読中 (タップで停止)";
       document.getElementById('ttsBtn').style.background = "#ff9900";
       log("TTS", "現在位置からのリアルタイム連続朗読を開始しました");
-
       processTtsQueue();
     }
 
     function processTtsQueue() {
       if (!isTtsActive || isSpeakingNow || ttsQueue.length === 0) return;
-
       const textToSpeak = ttsQueue.shift();
       isSpeakingNow = true;
 
@@ -347,11 +284,8 @@
 
       utterance.onend = () => {
         isSpeakingNow = false;
-        if (isTtsActive) {
-          processTtsQueue();
-        }
+        if (isTtsActive) processTtsQueue();
       };
-
       utterance.onerror = (e) => {
         log("Error", `読上げエラー: ${e.error}`);
         isSpeakingNow = false;
@@ -366,7 +300,6 @@
       isSpeakingNow = false;
       ttsQueue = [];
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-      
       const btn = document.getElementById('ttsBtn');
       if (btn) {
         btn.innerText = "🔊 最新から連続朗読";
@@ -389,10 +322,13 @@
 
       recognition.onstart = () => {
         isRecognizing = true;
-        setStatus("音声認識中... (マイクON)");
+        setStatus("音声認識中... (12.5秒周期で自動翻訳)");
         document.getElementById('startBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
         requestWakeLock();
+
+        // 12.5秒周期のタイマーを開始
+        bufferTimer = setInterval(processBuffer, BUFFER_INTERVAL_MS);
       };
 
       recognition.onresult = (event) => {
@@ -405,19 +341,7 @@
 
           if (event.results[i].isFinal) {
             finalEnglishText += filteredText + '. ';
-            
-            fetchGeminiTranslation(filteredText).then(jaText => {
-              if (jaText) {
-                finalJapaneseText += jaText + '\n';
-                interimJapaneseText = '';
-                renderJapanese();
-
-                if (isTtsActive) {
-                  ttsQueue.push(jaText);
-                  processTtsQueue();
-                }
-              }
-            });
+            pendingEnglishBuffer += filteredText + '. '; // バッファに溜め込む
           } else {
             currentInterimEn += filteredText;
           }
@@ -426,17 +350,6 @@
         const enDisplay = document.getElementById('transcriptDisplay');
         enDisplay.innerHTML = finalEnglishText + (currentInterimEn ? `<span class="interim-text">${currentInterimEn}</span>` : '');
         enDisplay.scrollTop = enDisplay.scrollHeight;
-
-        if (currentInterimEn) {
-          clearTimeout(translateTimer);
-          translateTimer = setTimeout(async () => {
-            const jaText = await fetchGeminiTranslation(currentInterimEn);
-            if (jaText) {
-              interimJapaneseText = jaText;
-              renderJapanese();
-            }
-          }, 400);
-        }
       };
 
       recognition.onerror = (e) => log("Error", `認識エラー: ${e.error}`);
@@ -448,6 +361,7 @@
           setStatus("停止中");
           document.getElementById('startBtn').disabled = false;
           document.getElementById('stopBtn').disabled = true;
+          if (bufferTimer) clearInterval(bufferTimer);
           releaseWakeLock();
         }
       };
@@ -463,6 +377,8 @@
 
     function stopRecognition() {
       isRecognizing = false;
+      if (bufferTimer) clearInterval(bufferTimer);
+      processBuffer(); // 停止時に残りのバッファを送信
       if (recognition) recognition.stop();
       stopSpeaking();
       setStatus("停止処理中...");
@@ -472,7 +388,7 @@
       stopSpeaking();
       finalEnglishText = '';
       finalJapaneseText = '';
-      interimJapaneseText = '';
+      pendingEnglishBuffer = '';
       document.getElementById('transcriptDisplay').innerText = '(音声認識を開始してください...)';
       document.getElementById('translationDisplay').innerText = '(翻訳結果がここに表示されます...)';
     }
@@ -484,7 +400,7 @@
     async function downloadTranscript() {
       if (!finalEnglishText && !finalJapaneseText) return;
       const fileContent = `【英文講義テキスト】\n${finalEnglishText}\n\n【日本語訳】\n${finalJapaneseText}`;
-      const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8;' });
+      const blob = new Blob trophy = new Blob([fileContent], { type: 'text/plain;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
