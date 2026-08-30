@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v10.3)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v10.4)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -49,7 +49,6 @@
     .status { font-size: 11px; color: #aaa; padding: 6px; background: #080808; border: 1px solid #222; border-radius: 4px; }
     .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 10px; height: 90px; overflow-y: auto; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
     
-    /* 音声メーター */
     .meter-container { background: #000; border: 1px solid #333; height: 12px; border-radius: 6px; overflow: hidden; position: relative; }
     .meter-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #00ff00 60%, #ffff00 85%, #ff0000 100%); transition: width 0.05s ease; }
     .metric-info { display: flex; justify-content: space-between; font-size: 10px; color: #888; margin-top: 2px; }
@@ -71,7 +70,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v10.3</span>
+      <span class="badge">v10.4</span>
     </h2>
 
     <div>
@@ -94,13 +93,12 @@
       <input type="number" id="intervalSec" value="5" min="2" max="15">
     </div>
 
-    <!-- マイク感度＆レベルメーター -->
     <div style="background:#111; padding:8px; border-radius:6px; border:1px solid #222;">
       <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-        <label style="color:#00FF00; font-weight:bold;">マイク増幅感度:</label>
-        <span id="gainValue" style="color:#fff;">100%</span>
+        <label style="color:#00FF00; font-weight:bold;">マイク増幅感度 (100%〜500%):</label>
+        <span id="gainValue" style="color:#fff;">200%</span>
       </div>
-      <input type="range" id="gainSlider" min="0.5" max="3.0" step="0.1" value="1.0" oninput="updateGain(this.value)">
+      <input type="range" id="gainSlider" min="0.5" max="5.0" step="0.1" value="2.0" oninput="updateGain(this.value)">
 
       <div style="margin-top:8px;">
         <div class="meter-container">
@@ -137,7 +135,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v10.3] Audio Monitor Ready.</div>
+    <div id="logBox" class="log-box">[System v10.4] Filter Adjusted.</div>
   </div>
 
   <script>
@@ -211,7 +209,6 @@
       try {
         audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         
-        // AudioContextの構築（ゲイン調整＋レベルメーター用）
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(audioStream);
         
@@ -228,7 +225,6 @@
         gainNode.connect(analyser);
         gainNode.connect(destination);
 
-        // メーター描画ループ開始
         drawMeter();
 
         isRunning = true;
@@ -281,7 +277,6 @@
         if (chunks.length > 0 && isRunning) {
           const audioBlob = new Blob(chunks, { type: 'audio/webm' });
           
-          // 送信データ容量（KB）のリアルタイム更新
           const sizeInKB = (audioBlob.size / 1024).toFixed(1);
           document.getElementById('dataSizeDisplay').innerText = `${sizeInKB} KB`;
 
@@ -322,20 +317,16 @@
         const data = await response.json();
         let englishText = data.text ? data.text.trim() : '';
 
-        // ノイズ・無音幻聴・定型句のフィルタリング
-        const noisePatterns = [
-          /^thank you/i,
-          /^you$/i,
-          /^do not output/i,
-          /^silence/i,
-          /^subtitles/i,
-          /^amara\.org/i,
-          /^[\s\.\,\!\?\-\_]+$/
+        // スキップ判定を緩和（無音幻聴の完全一致・特定のシステム指示のみ除外）
+        const exactNoiseList = [
+          "thank you.", "thank you", "you", "you.", "amara.org",
+          "do not output anything if there is silence."
         ];
 
-        const isNoise = noisePatterns.some(pattern => pattern.test(englishText));
+        const isExactNoise = exactNoiseList.includes(englishText.toLowerCase());
+        const isOnlyPunctuation = /^[\s\.\,\!\?\-\_]+$/.test(englishText);
 
-        if (englishText && !isNoise) {
+        if (englishText && !isExactNoise && !isOnlyPunctuation) {
           fullTranscript += (fullTranscript ? ' ' : '') + englishText;
           renderEnglish();
           log("Whisper", `認識成功: "${englishText}"`);
