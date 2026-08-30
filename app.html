@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v10.1)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v10.3)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -41,12 +41,18 @@
     h2 { color: #00FF00; font-size: 15px; margin: 0 0 6px 0; display: flex; justify-content: space-between; align-items: center; }
     .badge { background: #00FF00; color: #000; font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
     input, select, button { background: #222; border: 1px solid #444; color: #fff; padding: 7px; border-radius: 4px; font-size: 12px; width: 100%; }
+    input[type="range"] { padding: 0; cursor: pointer; }
     button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 9px; transition: background 0.2s; }
     button:hover { background: #00dd00; color: #000; }
     button.stop-btn { background: #cc3333; }
     button.stop-btn:hover { background: #ff4444; color: #fff; }
     .status { font-size: 11px; color: #aaa; padding: 6px; background: #080808; border: 1px solid #222; border-radius: 4px; }
-    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 10px; height: 100px; overflow-y: auto; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 10px; height: 90px; overflow-y: auto; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+    
+    /* 音声メーター */
+    .meter-container { background: #000; border: 1px solid #333; height: 12px; border-radius: 6px; overflow: hidden; position: relative; }
+    .meter-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #00ff00 60%, #ffff00 85%, #ff0000 100%); transition: width 0.05s ease; }
+    .metric-info { display: flex; justify-content: space-between; font-size: 10px; color: #888; margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -65,7 +71,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v10.1</span>
+      <span class="badge">v10.3</span>
     </h2>
 
     <div>
@@ -86,6 +92,25 @@
     <div>
       <label style="color:#00FF00; font-weight:bold;">音声送信間隔 (秒):</label>
       <input type="number" id="intervalSec" value="5" min="2" max="15">
+    </div>
+
+    <!-- マイク感度＆レベルメーター -->
+    <div style="background:#111; padding:8px; border-radius:6px; border:1px solid #222;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+        <label style="color:#00FF00; font-weight:bold;">マイク増幅感度:</label>
+        <span id="gainValue" style="color:#fff;">100%</span>
+      </div>
+      <input type="range" id="gainSlider" min="0.5" max="3.0" step="0.1" value="1.0" oninput="updateGain(this.value)">
+
+      <div style="margin-top:8px;">
+        <div class="meter-container">
+          <div id="meterBar" class="meter-bar"></div>
+        </div>
+        <div class="metric-info">
+          <span>収音レベル</span>
+          <span>直近送信サイズ: <strong id="dataSizeDisplay" style="color:#00FFFF;">0.0 KB</strong></span>
+        </div>
+      </div>
     </div>
 
     <div style="display:flex; gap:8px;">
@@ -112,13 +137,17 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v10.1] Whisper Filter Ready.</div>
+    <div id="logBox" class="log-box">[System v10.3] Audio Monitor Ready.</div>
   </div>
 
   <script>
     let isRunning = false;
     let audioStream = null;
     let mediaRecorder = null;
+    let audioContext = null;
+    let gainNode = null;
+    let analyser = null;
+    let animFrameId = null;
 
     let fullTranscript = '';
     let finalJapaneseText = '';
@@ -163,6 +192,13 @@
       if (statusEl) statusEl.innerText = msg;
     }
 
+    function updateGain(val) {
+      document.getElementById('gainValue').innerText = Math.round(val * 100) + '%';
+      if (gainNode) {
+        gainNode.gain.value = parseFloat(val);
+      }
+    }
+
     async function startProcessing() {
       const openaiKey = document.getElementById('openaiKey').value.trim();
       const geminiKey = document.getElementById('geminiKey').value.trim();
@@ -174,15 +210,36 @@
 
       try {
         audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // AudioContextの構築（ゲイン調整＋レベルメーター用）
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(audioStream);
+        
+        gainNode = audioContext.createGain();
+        const initialGain = parseFloat(document.getElementById('gainSlider').value);
+        gainNode.gain.value = initialGain;
+
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+
+        const destination = audioContext.createMediaStreamDestination();
+
+        source.connect(gainNode);
+        gainNode.connect(analyser);
+        gainNode.connect(destination);
+
+        // メーター描画ループ開始
+        drawMeter();
+
         isRunning = true;
 
         document.getElementById('startBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
         setStatus("録音・解析中... (マイクON)");
-        log("System", "マイク録音を開始しました");
+        log("System", "マイク録音・オーディオモニターを開始しました");
 
         const intervalMs = parseInt(document.getElementById('intervalSec').value) * 1000;
-        recordAndProcessChunk(openaiKey, geminiKey, intervalMs);
+        recordAndProcessChunk(destination.stream, openaiKey, geminiKey, intervalMs);
 
       } catch (e) {
         log("Error", `マイク起動エラー: ${e.message}`);
@@ -190,21 +247,48 @@
       }
     }
 
-    function recordAndProcessChunk(openaiKey, geminiKey, duration) {
+    function drawMeter() {
+      if (!analyser) return;
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(dataArray);
+
+      let sum = 0;
+      for (let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / dataArray.length;
+      const volumePercent = Math.min(100, Math.round((average / 128) * 100));
+
+      const meterBar = document.getElementById('meterBar');
+      if (meterBar) {
+        meterBar.style.width = volumePercent + '%';
+      }
+
+      if (isRunning) {
+        animFrameId = requestAnimationFrame(drawMeter);
+      }
+    }
+
+    function recordAndProcessChunk(processedStream, openaiKey, geminiKey, duration) {
       if (!isRunning) return;
 
       const chunks = [];
-      mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+      mediaRecorder = new MediaRecorder(processedStream, { mimeType: 'audio/webm' });
 
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
       mediaRecorder.onstop = async () => {
         if (chunks.length > 0 && isRunning) {
           const audioBlob = new Blob(chunks, { type: 'audio/webm' });
+          
+          // 送信データ容量（KB）のリアルタイム更新
+          const sizeInKB = (audioBlob.size / 1024).toFixed(1);
+          document.getElementById('dataSizeDisplay').innerText = `${sizeInKB} KB`;
+
           processWhisperAndTranslate(audioBlob, openaiKey, geminiKey);
         }
         if (isRunning) {
-          recordAndProcessChunk(openaiKey, geminiKey, duration);
+          recordAndProcessChunk(processedStream, openaiKey, geminiKey, duration);
         }
       };
 
@@ -221,8 +305,6 @@
       formData.append("file", audioBlob, "audio.webm");
       formData.append("model", "whisper-1");
       formData.append("language", "en");
-      // 無音時の「Thank you.」連発を抑止する指示パラメータ
-      formData.append("prompt", "Transcribe the spoken English accurately. Do not output anything if there is silence.");
 
       try {
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -240,17 +322,27 @@
         const data = await response.json();
         let englishText = data.text ? data.text.trim() : '';
 
-        // Whisperの無音幻聴パターン（Thank you, Youなど）を除外
-        if (/^(thank you|you|\.|\s)+$/i.test(englishText)) {
-          englishText = '';
-        }
+        // ノイズ・無音幻聴・定型句のフィルタリング
+        const noisePatterns = [
+          /^thank you/i,
+          /^you$/i,
+          /^do not output/i,
+          /^silence/i,
+          /^subtitles/i,
+          /^amara\.org/i,
+          /^[\s\.\,\!\?\-\_]+$/
+        ];
 
-        if (englishText) {
+        const isNoise = noisePatterns.some(pattern => pattern.test(englishText));
+
+        if (englishText && !isNoise) {
           fullTranscript += (fullTranscript ? ' ' : '') + englishText;
           renderEnglish();
           log("Whisper", `認識成功: "${englishText}"`);
 
           await translateWithGemini(englishText, geminiKey);
+        } else {
+          log("Whisper", "無音またはノイズをスキップしました");
         }
       } catch (e) {
         log("Error", `Whisper 通信エラー: ${e.message}`);
@@ -320,9 +412,15 @@ English:
 
     function stopProcessing() {
       isRunning = false;
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      if (audioContext) audioContext.close();
       if (audioStream) {
         audioStream.getTracks().forEach(track => track.stop());
       }
+      
+      const meterBar = document.getElementById('meterBar');
+      if (meterBar) meterBar.style.width = '0%';
+
       stopSpeaking();
       setStatus("停止中");
       document.getElementById('startBtn').disabled = false;
