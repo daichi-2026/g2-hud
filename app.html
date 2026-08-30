@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v9.0 超高速ストリーム版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v9.1 ストリーム完全対応版)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -58,7 +58,7 @@
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
     <div class="display-box japanese">
-      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 超高速即時訳)】</div>
+      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 爆速追従版)】</div>
       <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
     </div>
   </div>
@@ -66,7 +66,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v9.0</span>
+      <span class="badge">v9.1</span>
     </h2>
 
     <div>
@@ -111,7 +111,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v9.0] Ultra Fast Stream Engine Ready.</div>
+    <div id="logBox" class="log-box">[System v9.1] Realtime Force-Chunk Stream Ready.</div>
   </div>
 
   <script>
@@ -119,6 +119,9 @@
     let isRecognizing = false;
     let finalEnglishText = '';
     let finalJapaneseText = '';
+    
+    let unhandledEnglish = '';
+    let lastSentLength = 0;
 
     let ttsQueue = [];
     let isTtsActive = false;
@@ -161,25 +164,25 @@
       if (statusEl) statusEl.innerText = msg;
     }
 
-    // 確定した1文ごとに即時非同期リクエストを送る
-    async function translateChunkImmediately(englishChunk) {
+    async function sendToGeminiImmediate(chunkText) {
       const apiKey = document.getElementById('apiKey').value.trim();
       let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       
-      if (!apiKey || !englishChunk.trim()) return;
+      if (!apiKey || !chunkText.trim()) return;
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
       const requestData = {
         systemInstruction: {
-          parts: [{ text: "You are an instant live translator. Translate the given English spoken sentence into natural Japanese. Output ONLY the Japanese translation. Absolutely no English, no thoughts, no typos notes, and no markdown." }]
+          parts: [{ text: "Translate the following English spoken fragment directly into concise Japanese. Return ONLY the translation. Never include drafting, thoughts, notes, markdown, or English." }]
         },
         contents: [{
-          parts: [{ text: englishChunk }]
+          parts: [{ text: chunkText }]
         }],
         generationConfig: {
           temperature: 0.0,
-          maxOutputTokens: 200
+          maxOutputTokens: 150,
+          thinkingConfig: { thinkingBudget: 0 }
         }
       };
 
@@ -193,10 +196,13 @@
         if (response.ok) {
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-          translatedText = translatedText.replace(/^[`"'\s]+|[`"'\s]+$/g, '');
+          
+          // 不要な思考記号や雑音を強力除外
+          translatedText = translatedText.replace(/(Drafting|Refine|Translation|Note|Wait).*$/gi, '');
+          translatedText = translatedText.replace(/^[`"'\s\-*]+|[`"'\s\-*]+$/g, '');
 
           if (translatedText) {
-            finalJapaneseText += translatedText + '\n';
+            finalJapaneseText += translatedText + ' ';
             renderJapanese();
 
             if (isTtsActive) {
@@ -299,6 +305,7 @@
 
       recognition.onresult = (event) => {
         let currentInterimEn = '';
+        let currentFinalEn = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
           const rawText = event.results[i][0].transcript;
@@ -306,13 +313,29 @@
           if (!filteredText) continue;
 
           if (event.results[i].isFinal) {
-            finalEnglishText += filteredText + '. ';
-            
-            // 確定文を即時・非同期でGeminiへ送信
-            translateChunkImmediately(filteredText);
+            currentFinalEn += filteredText + '. ';
           } else {
-            currentInterimEn += filteredText;
+            currentInterimEn += filteredText + ' ';
           }
+        }
+
+        if (currentFinalEn) {
+          finalEnglishText += currentFinalEn;
+          unhandledEnglish += currentFinalEn;
+        }
+
+        // 未確定の文字起こしも含めた全文チェック
+        const fullCurrentStream = unhandledEnglish + currentInterimEn;
+        const words = fullCurrentStream.trim().split(/\s+/);
+
+        // 10単語以上溜まったら強制的にGeminiへ送って区切る
+        if (words.length >= 10) {
+          const chunkToSend = words.slice(0, 10).join(' ');
+          sendToGeminiImmediate(chunkToSend);
+
+          // 処理済みの単語をクリア
+          const remainingWords = words.slice(10).join(' ');
+          unhandledEnglish = remainingWords;
         }
 
         const enDisplay = document.getElementById('transcriptDisplay');
@@ -342,6 +365,7 @@
         if (!initSpeechRecognition()) return;
       }
       isRecognizing = true;
+      unhandledEnglish = '';
       recognition.lang = document.getElementById('languageSelect').value;
       try {
         recognition.start();
@@ -361,6 +385,7 @@
       stopSpeaking();
       finalEnglishText = '';
       finalJapaneseText = '';
+      unhandledEnglish = '';
       document.getElementById('transcriptDisplay').innerText = '(音声認識を開始してください...)';
       document.getElementById('translationDisplay').innerText = '(翻訳結果がここに表示されます...)';
     }
