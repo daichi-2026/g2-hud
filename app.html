@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v9.2)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v9.3)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -33,7 +33,7 @@
       background: #050505; padding: 10px; border: 1px solid #222; border-radius: 4px;
     }
     .display-box.japanese .content-area { color: #FFFFFF; }
-    .interim-text { color: #888888; font-style: italic; display: block; margin-top: 4px; }
+    .interim-text { color: #888888; font-style: italic; }
     .side-panel {
       width: 360px; display: flex; flex-direction: column; gap: 10px;
       background: #1a1a1a; padding: 12px; border-radius: 8px; border: 1px solid #333;
@@ -58,7 +58,7 @@
       <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
     </div>
     <div class="display-box japanese">
-      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 高速追従版)】</div>
+      <div class="section-title">【リアルタイム日本語訳 (GEMINI AI 爆速追従版)】</div>
       <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
     </div>
   </div>
@@ -66,7 +66,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v9.2</span>
+      <span class="badge">v9.3</span>
     </h2>
 
     <div>
@@ -111,17 +111,20 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v9.2] High-Speed Engine Ready.</div>
+    <div id="logBox" class="log-box">[System v9.3] Real-time Stream Engine Ready.</div>
   </div>
 
   <script>
     let recognition = null;
     let isRecognizing = false;
-    let finalEnglishText = '';
-    let finalJapaneseText = '';
     
-    let lastTranslatedIndex = 0;
+    let rawFinalEn = '';
+    let rawInterimEn = '';
+    
+    let processedCharLength = 0;
     let timerId = null;
+
+    let finalJapaneseText = '';
 
     let ttsQueue = [];
     let isTtsActive = false;
@@ -145,12 +148,6 @@
       localStorage.setItem('gemini_model_name', e.target.value.trim());
     });
 
-    function cleanEnglishOnly(text) {
-      if (!text) return '';
-      let cleaned = text.replace(/[^a-zA-Z0-9\s.,?!'\"]/g, '');
-      return cleaned.replace(/\s+/g, ' ').trim();
-    }
-
     function log(tag, msg) {
       const timeStr = new Date().toLocaleTimeString();
       const logBox = document.getElementById('logBox');
@@ -164,18 +161,18 @@
       if (statusEl) statusEl.innerText = msg;
     }
 
-    async function sendChunkToGemini(chunkText) {
+    async function translateChunk(textToTranslate) {
       const apiKey = document.getElementById('apiKey').value.trim();
       let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       
-      if (!apiKey || !chunkText.trim()) return;
+      if (!apiKey || !textToTranslate.trim()) return;
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
       const requestData = {
         contents: [{
           parts: [{ 
-            text: "You are a real-time speech translator. Translate the following English audio transcript fragment into natural Japanese. Output ONLY the Japanese translation. Do NOT output thinking, drafting notes, or English.\n\nEnglish: " + chunkText 
+            text: "Translate the following English speech transcript fragment into Japanese. Output ONLY the Japanese translation. Never include English text, quotes, or notes.\n\nEnglish: " + textToTranslate 
           }]
         }],
         generationConfig: {
@@ -195,11 +192,12 @@
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
           
-          // 余計なAIの思考文を削除
+          // 英文や記号の残存を除去
+          translatedText = translatedText.replace(/[a-zA-Z]{4,}/g, '');
           translatedText = translatedText.replace(/^[`"'\s\-*]+|[`"'\s\-*]+$/g, '');
 
-          if (translatedText) {
-            finalJapaneseText += translatedText + '\n';
+          if (translatedText.trim()) {
+            finalJapaneseText += translatedText + ' ';
             renderJapanese();
 
             if (isTtsActive) {
@@ -212,7 +210,7 @@
           log("Gemini Error", errData.error?.message || response.statusText);
         }
       } catch (e) {
-        log("Error", `API通信エラー: ${e.message}`);
+        log("Error", `通信エラー: ${e.message}`);
       }
     }
 
@@ -224,16 +222,19 @@
       }
     }
 
-    function checkAndTranslateLoop() {
+    function processStreamBuffer() {
       if (!isRecognizing) return;
 
-      const currentText = finalEnglishText.trim();
-      if (currentText.length > lastTranslatedIndex) {
-        const newChunk = currentText.substring(lastTranslatedIndex).trim();
-        // 5文字以上の新規英単語が溜まっていたら送信
-        if (newChunk.length >= 5) {
-          lastTranslatedIndex = currentText.length;
-          sendChunkToGemini(newChunk);
+      const fullText = (rawFinalEn + ' ' + rawInterimEn).trim();
+      if (fullText.length > processedCharLength + 30) {
+        const unprocessedChunk = fullText.substring(processedCharLength).trim();
+        
+        // スペースで区切って安全な切り出しポイントを探す
+        const lastSpacePos = unprocessedChunk.lastIndexOf(' ');
+        if (lastSpacePos > 20) {
+          const chunkToSend = unprocessedChunk.substring(0, lastSpacePos);
+          processedCharLength += chunkToSend.length + 1;
+          translateChunk(chunkToSend);
         }
       }
     }
@@ -247,15 +248,14 @@
       if (!('speechSynthesis' in window)) return;
       isTtsActive = true;
       ttsQueue = [];
-      const lines = finalJapaneseText.trim().split('\n').filter(l => l.trim().length > 0);
-      if (lines.length > 0) ttsQueue.push(lines[lines.length - 1]);
+      if (finalJapaneseText.trim()) ttsQueue.push(finalJapaneseText.trim());
 
       const btn = document.getElementById('ttsBtn');
       if (btn) {
         btn.innerText = "🔊 連続朗読中 (タップで停止)";
         btn.style.background = "#ff9900";
       }
-      log("TTS", "リアルタイム連続朗読を開始しました");
+      log("TTS", "朗読を開始しました");
       processTtsQueue();
     }
 
@@ -313,29 +313,28 @@
         document.getElementById('stopBtn').disabled = false;
         log("System", "音声認識を開始しました");
 
-        // 0.8秒ごとに未送信の英文があるかチェックして即時送信
         if (timerId) clearInterval(timerId);
-        timerId = setInterval(checkAndTranslateLoop, 800);
+        timerId = setInterval(processStreamBuffer, 700);
       };
 
       recognition.onresult = (event) => {
-        let currentInterimEn = '';
+        let interim = '';
+        let final = '';
 
         for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const rawText = event.results[i][0].transcript;
-          const filteredText = cleanEnglishOnly(rawText);
-          if (!filteredText) continue;
-
           if (event.results[i].isFinal) {
-            finalEnglishText += filteredText + '. ';
+            final += event.results[i][0].transcript + ' ';
           } else {
-            currentInterimEn += filteredText + ' ';
+            interim += event.results[i][0].transcript + ' ';
           }
         }
 
+        if (final) rawFinalEn += final;
+        rawInterimEn = interim;
+
         const enDisplay = document.getElementById('transcriptDisplay');
         if (enDisplay) {
-          enDisplay.innerHTML = finalEnglishText + (currentInterimEn ? `<span class="interim-text">${currentInterimEn}</span>` : '');
+          enDisplay.innerHTML = rawFinalEn + (rawInterimEn ? `<span class="interim-text">${rawInterimEn}</span>` : '');
           enDisplay.scrollTop = enDisplay.scrollHeight;
         }
       };
@@ -361,7 +360,7 @@
         if (!initSpeechRecognition()) return;
       }
       isRecognizing = true;
-      lastTranslatedIndex = 0;
+      processedCharLength = 0;
       recognition.lang = document.getElementById('languageSelect').value;
       try {
         recognition.start();
@@ -380,9 +379,10 @@
 
     function clearTranscript() {
       stopSpeaking();
-      finalEnglishText = '';
+      rawFinalEn = '';
+      rawInterimEn = '';
       finalJapaneseText = '';
-      lastTranslatedIndex = 0;
+      processedCharLength = 0;
       document.getElementById('transcriptDisplay').innerText = '(音声認識を開始してください...)';
       document.getElementById('translationDisplay').innerText = '(翻訳結果がここに表示されます...)';
     }
@@ -393,8 +393,9 @@
     }
 
     async function downloadTranscript() {
-      if (!finalEnglishText && !finalJapaneseText) return;
-      const fileContent = `【英文講義テキスト】\n${finalEnglishText}\n\n【日本語訳】\n${finalJapaneseText}`;
+      const fullEn = (rawFinalEn + ' ' + rawInterimEn).trim();
+      if (!fullEn && !finalJapaneseText) return;
+      const fileContent = `【英文講義テキスト】\n${fullEn}\n\n【日本語訳】\n${finalJapaneseText}`;
       const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
