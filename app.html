@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>リアルタイム講義翻訳 (Deepgram版)</title>
+    <title>リアルタイム講義翻訳 (G2 Deepgram移植版)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 16px; background-color: #f5f5f7; color: #1d1d1f; }
         .container { max-width: 600px; margin: 0 auto; }
         .card { background: #ffffff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .header-title { display: flex; align-items: center; justify-content: space-between; }
-        .version-tag { background: #ff9500; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
+        .version-tag { background: #34c759; color: white; padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: bold; }
         label { font-size: 0.85rem; font-weight: bold; color: #6e6e73; display: block; margin-bottom: 4px; }
         input, select, button { width: 100%; padding: 12px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box; font-size: 1rem; }
         .key-container { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -30,12 +30,7 @@
         .error-msg { color: #ff3b30; font-size: 0.85rem; text-align: center; margin-top: 4px; }
         .setting-group { display: flex; gap: 8px; }
         .setting-group > div { flex: 1; }
-
-        .interim-text { color: #86868b; font-style: italic; }
-
-        .debug-box { height: 140px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; }
-        .volume-bar-bg { width: 100%; height: 8px; background: #e5e5ea; border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
-        .volume-bar-fill { height: 100%; width: 0%; background: #34c759; transition: width 0.1s ease; }
+        .debug-box { height: 120px; overflow-y: auto; background: #1c1c1e; color: #34c759; font-family: monospace; font-size: 0.75rem; padding: 8px; border-radius: 8px; }
     </style>
 </head>
 <body>
@@ -43,13 +38,13 @@
 <div class="container">
     <div class="header-title">
         <h2>リアルタイム講義翻訳</h2>
-        <span class="version-tag">v1.4 (Interim Ready)</span>
+        <span class="version-tag">v4.0 (G2 REST Ported)</span>
     </div>
     
     <div class="card">
         <label for="deepgramKey">Deepgram API Key</label>
         <div class="key-container">
-            <input type="password" id="deepgramKey" placeholder="Deepgram API Key">
+            <input type="password" id="deepgramKey" placeholder="Deepgram Key">
             <button id="clearDgKeyBtn" type="button">消去</button>
         </div>
         <div id="saveDgHint" class="saved-hint">✓ ブラウザに保存されています</div>
@@ -63,7 +58,7 @@
         
         <div class="setting-group">
             <div>
-                <label for="sourceLang">話し手の言語 (音声入力)</label>
+                <label for="sourceLang">話し手の言語</label>
                 <select id="sourceLang">
                     <option value="en" selected>英語 (English)</option>
                     <option value="ja">日本語 (Japanese)</option>
@@ -98,11 +93,6 @@
             </div>
         </div>
 
-        <label>マイク入力音量</label>
-        <div class="volume-bar-bg">
-            <div id="volumeFill" class="volume-bar-fill"></div>
-        </div>
-
         <button id="toggleBtn" class="action-btn">翻訳を開始する</button>
         <div id="status">停止中</div>
         <div id="errorLog" class="error-msg"></div>
@@ -126,27 +116,23 @@
 
 <script>
     const STORAGE_DG_KEY = 'deepgram_api_key';
-    const STORAGE_G_KEY = 'google_translate_api_key';
+    const STORAGE_G_KEY = 'google_api_key';
 
-    let socket = null;
     let mediaStream = null;
-    let mediaRecorder = null;
     let audioContext = null;
-    let analyser = null;
-    let animFrameId = null;
-    let keepAliveTimer = null;
+    let processor = null;
     let isListening = false;
-    let wakeLock = null;
+    let isProcessing = false;
     let availableVoices = [];
 
-    // 途中経過（確定前）の表示要素
-    let interimOriginalElem = null;
+    let activePcmChunks = [];
+    let activeTotalBytes = 0;
+    let chunkTimer = null;
 
     const toggleBtn = document.getElementById('toggleBtn');
     const statusDiv = document.getElementById('status');
     const errorLog = document.getElementById('errorLog');
     const debugLog = document.getElementById('debugLog');
-    const volumeFill = document.getElementById('volumeFill');
     const originalBox = document.getElementById('originalText');
     const translatedBox = document.getElementById('translatedText');
 
@@ -175,7 +161,7 @@
     }
 
     window.addEventListener('DOMContentLoaded', () => {
-        log("システム初期化完了 (v1.4 - Stream Ready)");
+        log("システム初期化完了 (v4.0 - G2 REST Logic)");
         const savedDgKey = localStorage.getItem(STORAGE_DG_KEY);
         if (savedDgKey) {
             deepgramKeyInput.value = savedDgKey;
@@ -277,6 +263,76 @@
         window.speechSynthesis.speak(utterance);
     }
 
+    // --- EVEN G2 移植関数: WAVヘッダー作成 ---
+    function createWavBlob(chunks, dataSize) {
+        const sampleRate = 16000;
+        const numChannels = 1;
+        const bitsPerSample = 16;
+        
+        const buffer = new ArrayBuffer(44 + dataSize);
+        const view = new DataView(buffer);
+
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + dataSize, true);
+        writeString(view, 8, 'WAVE');
+
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+        view.setUint16(34, bitsPerSample, true);
+
+        writeString(view, 36, 'data');
+        view.setUint32(40, dataSize, true);
+
+        let offset = 44;
+        for (const chunk of chunks) {
+            new Uint8Array(buffer, offset, chunk.byteLength).set(chunk);
+            offset += chunk.byteLength;
+        }
+
+        return new Blob([buffer], { type: 'audio/wav' });
+    }
+
+    function writeString(view, offset, string) {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    }
+
+    // --- EVEN G2 移植関数: Deepgram POST送信 ---
+    async function transcribeWithDeepgram(wavBlob) {
+        const deepgramKey = deepgramKeyInput.value.trim().replace(/\s+/g, '');
+        if (!deepgramKey) return "";
+
+        const srcLang = sourceLangSelect.value;
+        const model = srcLang === 'ja' ? 'general' : 'nova-2';
+        const url = `https://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&smart_format=true&punctuate=true`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Token ${deepgramKey}`,
+                    'Content-Type': 'audio/wav'
+                },
+                body: wavBlob
+            });
+
+            if (!response.ok) {
+                log(`Deepgram APIエラー: Status ${response.status}`, 'error');
+                return "";
+            }
+            const data = await response.json();
+            return (data.results?.channels[0]?.alternatives[0]?.transcript || '').trim();
+        } catch (e) {
+            log(`Deepgram通信エラー: ${e.message}`, 'error');
+            return "";
+        }
+    }
+
     toggleBtn.addEventListener('click', async () => {
         if (!isListening) {
             startTranslation();
@@ -295,172 +351,91 @@
             return;
         }
 
-        log("マイク接続要求中...");
+        log("マイク許可を取得中...");
         try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            });
-            log("マイクアクセスの許可を取得しました");
-            startVolumeMonitor(mediaStream);
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            log("マイク接続完了");
         } catch (e) {
-            log("マイクエラー: " + e.message, 'error');
-            errorLog.textContent = 'マイクのアクセスが拒否されました。';
+            log("マイク拒否: " + e.message, 'error');
+            errorLog.textContent = 'マイクアクセスが拒否されました。';
             return;
         }
 
         isListening = true;
         toggleBtn.textContent = '翻訳を停止する';
         toggleBtn.classList.add('stop');
-        statusDiv.textContent = 'Deepgramへ接続中...';
-        statusDiv.style.color = '#0071e3';
+        statusDiv.textContent = '音声認識中 (Deepgram)...';
+        statusDiv.style.color = '#34c759';
 
-        requestWakeLock();
+        startAudioProcessing(mediaStream);
+    }
 
-        const srcLang = sourceLangSelect.value;
-        const model = srcLang === 'ja' ? 'general' : 'nova-2';
+    function startAudioProcessing(stream) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const source = audioContext.createMediaStreamSource(stream);
         
-        // パラメータを最新仕様に最適化 (endpointing, utterance_end_ms)
-        const dgUrl = `wss://api.deepgram.com/v1/listen?model=${model}&language=${srcLang}&punctuate=true&smart_formatting=true&interim_results=true&endpointing=300&utterance_end_ms=1000`;
-        
-        log(`Deepgram接続要求: lang=${srcLang}, model=${model}`);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (e) => {
+            if (!isListening) return;
+
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcm16 = new Int16Array(inputData.length);
+
+            for (let i = 0; i < inputData.length; i++) {
+                let s = Math.max(-1, Math.min(1, inputData[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+
+            const uint8Chunk = new Uint8Array(pcm16.buffer);
+            activePcmChunks.push(uint8Chunk);
+            activeTotalBytes += uint8Chunk.byteLength;
+
+            // 1.5秒ごとにバッファした音声をDeepgramへPOST送信
+            if (!chunkTimer) {
+                chunkTimer = setTimeout(() => {
+                    chunkTimer = null;
+                    processQueue();
+                }, 1500);
+            }
+        };
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+        log("16kHz 音声プロセッサ起動");
+    }
+
+    async function processQueue() {
+        if (isProcessing || activePcmChunks.length === 0) return;
+        isProcessing = true;
+
+        const chunksToProcess = [...activePcmChunks];
+        const bytesToProcess = activeTotalBytes;
+
+        activePcmChunks = [];
+        activeTotalBytes = 0;
 
         try {
-            socket = new WebSocket(dgUrl, ['token', dgKey]);
-        } catch(e) {
-            log("WebSocket作成失敗: " + e.message, 'error');
-            stopTranslation();
-            return;
-        }
+            if (bytesToProcess >= 1600) {
+                log("Deepgramへ音声データ送信中...");
+                const wavBlob = createWavBlob(chunksToProcess, bytesToProcess);
+                const transcript = await transcribeWithDeepgram(wavBlob);
 
-        socket.onopen = () => {
-            log("WebSocket接続成功 (OPEN)");
-            statusDiv.textContent = '音声認識中 (Deepgram)...';
-            statusDiv.style.color = '#34c759';
+                if (transcript) {
+                    log(`[Deepgram確定]: "${transcript}"`);
+                    appendMessage(originalBox, transcript);
 
-            keepAliveTimer = setInterval(() => {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send(JSON.stringify({ type: "KeepAlive" }));
-                }
-            }, 5000);
-
-            startAudioRecording(mediaStream);
-        };
-
-        socket.onmessage = async (message) => {
-            try {
-                const received = JSON.parse(message.data);
-                
-                if (received.type === 'Error') {
-                    log(`Deepgramエラー: ${received.message}`, 'error');
-                    return;
-                }
-
-                const transcript = received.channel?.alternatives[0]?.transcript;
-                const isFinal = received.is_final;
-
-                if (transcript && transcript.length > 0) {
-                    if (isFinal) {
-                        // 確定テキストの表示と翻訳
-                        log(`[確定原文]: "${transcript}"`);
-                        removeInterimText();
-                        appendMessage(originalBox, transcript);
-                        
-                        log(`Google翻訳実行中...`);
-                        const translated = await translateText(transcript);
-                        log(`[確定翻訳]: "${translated}"`);
-                        appendMessage(translatedBox, translated);
-                        speakText(translated);
-                    } else {
-                        // 話している最中の途中テキスト（リアルタイム表示）
-                        updateInterimText(transcript);
-                    }
-                }
-            } catch (e) {
-                log("レスポンス解釈エラー: " + e.message, 'warn');
-            }
-        };
-
-        socket.onerror = (error) => {
-            log("WebSocketエラーが発生しました", 'error');
-            errorLog.textContent = '接続エラーが発生しました。';
-        };
-
-        socket.onclose = (event) => {
-            log(`接続切断: Code=${event.code}, Reason="${event.reason}"`, 'warn');
-            if (isListening) {
-                errorLog.textContent = `接続が切断されました (Code: ${event.code})`;
-                stopTranslation();
-            }
-        };
-    }
-
-    function startVolumeMonitor(stream) {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        analyser = audioContext.createAnalyser();
-        const source = audioContext.createMediaStreamSource(stream);
-        source.connect(analyser);
-        analyser.fftSize = 256;
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-        function updateVolume() {
-            if (!isListening) return;
-            analyser.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-            let average = sum / dataArray.length;
-            let val = Math.min(100, Math.floor((average / 128) * 100));
-            volumeFill.style.width = val + '%';
-            animFrameId = requestAnimationFrame(updateVolume);
-        }
-        updateVolume();
-    }
-
-    function startAudioRecording(stream) {
-        let options = {};
-        if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-            options = { mimeType: 'audio/webm;codecs=opus' };
-        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
-            options = { mimeType: 'audio/webm' };
-        }
-
-        log(`MediaRecorder使用フォーマット: ${options.mimeType || 'Default'}`);
-
-        mediaRecorder = new MediaRecorder(stream, options);
-
-        let count = 0;
-        mediaRecorder.addEventListener('dataavailable', (event) => {
-            if (event.data.size > 0 && socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(event.data);
-                count++;
-                if (count % 20 === 0) {
-                    log(`音声パケット送信継続中 (${count}個完了)`);
+                    log("Google翻訳実行中...");
+                    const translated = await translateText(transcript);
+                    log(`[Google翻訳]: "${translated}"`);
+                    appendMessage(translatedBox, translated);
+                    speakText(translated);
                 }
             }
-        });
-
-        // 250ms刻みでリアルタイム送信
-        mediaRecorder.start(250);
-    }
-
-    function updateInterimText(text) {
-        if (!interimOriginalElem) {
-            interimOriginalElem = document.createElement('p');
-            interimOriginalElem.className = 'interim-text';
-            interimOriginalElem.style.margin = '0 0 8px 0';
-            originalBox.appendChild(interimOriginalElem);
-        }
-        interimOriginalElem.textContent = '... ' + text;
-        originalBox.scrollTop = originalBox.scrollHeight;
-    }
-
-    function removeInterimText() {
-        if (interimOriginalElem) {
-            originalBox.removeChild(interimOriginalElem);
-            interimOriginalElem = null;
+        } catch (e) {
+            log("キュー処理エラー: " + e.message, 'error');
+        } finally {
+            isProcessing = false;
         }
     }
 
@@ -470,35 +445,24 @@
         toggleBtn.classList.remove('stop');
         statusDiv.textContent = '停止中';
         statusDiv.style.color = '#86868b';
-        volumeFill.style.width = '0%';
 
-        removeInterimText();
+        if (chunkTimer) { clearTimeout(chunkTimer); chunkTimer = null; }
+        activePcmChunks = [];
+        activeTotalBytes = 0;
 
-        if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
-        if (animFrameId) { cancelAnimationFrame(animFrameId); }
+        if (processor) { processor.disconnect(); processor = null; }
         if (audioContext) { audioContext.close(); audioContext = null; }
-
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-            mediaRecorder = null;
-        }
 
         if (mediaStream) {
             mediaStream.getTracks().forEach(track => track.stop());
             mediaStream = null;
         }
 
-        if (socket) {
-            try { socket.close(); } catch(e){}
-            socket = null;
-        }
-
         if ('speechSynthesis' in window) {
             window.speechSynthesis.cancel();
         }
 
-        releaseWakeLock();
-        log("正常停止しました");
+        log("システム停止完了");
     }
 
     async function translateText(text) {
@@ -524,19 +488,6 @@
         } catch (error) {
             log("Google 通信エラー: " + error.message, 'error');
             return '[通信エラー]';
-        }
-    }
-
-    async function requestWakeLock() {
-        try {
-            if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
-        } catch (err) {}
-    }
-
-    function releaseWakeLock() {
-        if (wakeLock !== null) {
-            wakeLock.release();
-            wakeLock = null;
         }
     }
 
