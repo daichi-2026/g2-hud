@@ -244,8 +244,8 @@
       const apiKey = document.getElementById('apiKey').value.trim();
       if (!apiKey || !text.trim()) return '';
 
-      // モデルエンドポイントを gemini-2.5-flash へ更新
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      // モデルエンドポイントを gemini-3.6-flash へ更新
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`;
       
       const prompt = `あなたはプロの即時通訳者です。
 以下は英語の講義やスピーチのリアルタイム音声認識テキストです。音声認識の誤り（単語の間違いや同音異義語の誤変換など）が含まれている可能性があります。
