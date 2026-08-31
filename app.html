@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v11.3 Clean)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v11.4)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -76,7 +76,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v11.3 Clean</span>
+      <span class="badge">v11.4</span>
     </h2>
 
     <div>
@@ -91,7 +91,7 @@
 
     <div>
       <label style="color:#00FF00; font-weight:bold;">Gemini モデル指定:</label>
-      <input type="text" id="modelInput" value="gemini-2.5-flash">
+      <input type="text" id="modelInput" value="gemini-3.6-flash">
     </div>
 
     <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
@@ -123,7 +123,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v11.3] Standard Gemini Model & System Instruction Active.</div>
+    <div id="logBox" class="log-box">[System v11.4] Model updated to gemini-3.6-flash with Strict Prompt.</div>
   </div>
 
   <script>
@@ -334,22 +334,23 @@
 
     async function translateWithGemini(englishText) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
-      const modelName = document.getElementById('modelInput').value.trim() || 'gemini-2.5-flash';
+      const modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
 
-      // システム領域と思用領域を明確に分離してAIの暴走・余計な出力を抑制
+      // gemini-3.6-flash 向けの強力なワンショット翻訳プロンプト
+      const prompt = `[Task] Translate English to Japanese.
+[Constraint] Output ONLY the natural Japanese translation string. Absolutely NO explanations, NO notes, NO markdown formatting, NO choices, NO greetings.
+
+English: "${englishText}"
+Japanese:`;
+
       const requestBody = {
-        system_instruction: {
-          parts: [{
-            text: "You are a direct translator. Translate the given English into plain Japanese in polite (desu/masu) style. Output ONLY the translated Japanese text. Never output notes, explanations, phonetic readings, quotes, or markdown formatting."
-          }]
-        },
         contents: [{
-          parts: [{ text: englishText }]
+          parts: [{ text: prompt }]
         }],
         generationConfig: { 
           temperature: 0.1,
-          maxOutputTokens: 200
+          maxOutputTokens: 150
         }
       };
 
@@ -364,11 +365,12 @@
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
           
-          // 万が一の不要記号・改行のクリーニング
+          // 余分な解説行・記号の強力除去処理
           translatedText = translatedText
+            .split('\n')[0] 
+            .replace(/^#+.*$/g, '')
             .replace(/^["'「」]/g, '')
             .replace(/["'「」]$/g, '')
-            .replace(/\n+/g, ' ')
             .trim();
 
           if (translatedText) {
