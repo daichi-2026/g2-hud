@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v11.2 Fix Prompt)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v11.3 Clean)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -76,7 +76,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v11.2 Fix</span>
+      <span class="badge">v11.3 Clean</span>
     </h2>
 
     <div>
@@ -91,7 +91,7 @@
 
     <div>
       <label style="color:#00FF00; font-weight:bold;">Gemini モデル指定:</label>
-      <input type="text" id="modelInput" value="gemini-3.6-flash">
+      <input type="text" id="modelInput" value="gemini-2.5-flash">
     </div>
 
     <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
@@ -123,7 +123,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v11.2] Prompt Strict Mode Ready.</div>
+    <div id="logBox" class="log-box">[System v11.3] Standard Gemini Model & System Instruction Active.</div>
   </div>
 
   <script>
@@ -139,10 +139,9 @@
     let silenceStart = null;
     let speechStartTime = null;
 
-    // パラメータ調整
     const SILENCE_THRESHOLD = 8;  
-    const SILENCE_DURATION = 600; // 0.6秒の無音で区切り
-    const MAX_RECORD_TIME = 6000; // 最大6秒で1回Whisperに送信
+    const SILENCE_DURATION = 600; 
+    const MAX_RECORD_TIME = 6000; 
 
     let fullTranscript = '';
     let finalJapaneseText = '';
@@ -322,7 +321,6 @@
         renderEnglish();
         log("Whisper", englishText);
 
-        // 7単語以上溜まったらGeminiで翻訳処理を実行
         if (englishBuffer.split(' ').length >= 7 || /[.?!]$/.test(englishBuffer)) {
           const textToTranslate = englishBuffer;
           englishBuffer = ''; 
@@ -336,48 +334,54 @@
 
     async function translateWithGemini(englishText) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
-      const modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
+      const modelName = document.getElementById('modelInput').value.trim() || 'gemini-2.5-flash';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
 
-      // 挨拶・解説・Markdown装飾を絶対に排除する指示
-      const prompt = `You are a professional lecture translator. 
-Translate the following English text into clear, natural Japanese for professional lecture context.
-
-Rules:
-1. Output ONLY the Japanese translation text. 
-2. Do NOT include greetings, intro, explanations, options, or Markdown.
-3. Keep it on a single line.
-
-English: "${englishText}"`;
+      // システム領域と思用領域を明確に分離してAIの暴走・余計な出力を抑制
+      const requestBody = {
+        system_instruction: {
+          parts: [{
+            text: "You are a direct translator. Translate the given English into plain Japanese in polite (desu/masu) style. Output ONLY the translated Japanese text. Never output notes, explanations, phonetic readings, quotes, or markdown formatting."
+          }]
+        },
+        contents: [{
+          parts: [{ text: englishText }]
+        }],
+        generationConfig: { 
+          temperature: 0.1,
+          maxOutputTokens: 200
+        }
+      };
 
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { 
-              temperature: 0.1,
-              maxOutputTokens: 200
-            }
-          })
+          body: JSON.stringify(requestBody)
         });
 
         if (response.ok) {
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
           
-          // 万が一Markdownヘッダーや余計な改行が含まれていた場合のクリーンアップ
-          translatedText = translatedText.replace(/^#+.*$/gm, '').replace(/\n+/g, ' ').trim();
+          // 万が一の不要記号・改行のクリーニング
+          translatedText = translatedText
+            .replace(/^["'「」]/g, '')
+            .replace(/["'「」]$/g, '')
+            .replace(/\n+/g, ' ')
+            .trim();
 
           if (translatedText) {
             finalJapaneseText += (finalJapaneseText ? '\n' : '') + translatedText;
             renderJapanese();
             log("Gemini", translatedText);
           }
+        } else {
+          const err = await response.json();
+          log("Error", `Gemini APIエラー: ${err.error?.message || response.statusText}`);
         }
       } catch (e) {
-        log("Error", `Geminiエラー: ${e.message}`);
+        log("Error", `Gemini通信エラー: ${e.message}`);
       }
     }
 
