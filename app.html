@@ -3,54 +3,61 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v10.7 VAD版)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v11.0 Hybrid)</title>
   <style>
     * { box-sizing: border-box; }
     body {
       background-color: #111;
       color: #00FF00;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       margin: 0;
-      padding: 15px;
+      padding: 12px;
       display: flex;
+      flex-direction: column;
       height: 100vh;
-      gap: 15px;
+      gap: 10px;
     }
-    .main-container { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+    @media (min-width: 768px) {
+      body { flex-direction: row; padding: 15px; gap: 15px; }
+    }
+    .main-container { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
     .display-box {
       background-color: #000;
       border: 2px solid #00FF00;
       border-radius: 8px;
-      padding: 12px;
-      display: flex; flex-direction: column; gap: 6px; flex: 1; overflow: hidden;
+      padding: 10px;
+      display: flex; flex-direction: column; gap: 4px; flex: 1; overflow: hidden;
     }
     .display-box.japanese { border-color: #00FFFF; }
-    .section-title { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .section-title { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
     .display-box.japanese .section-title { color: #00FFFF; }
     .content-area {
-      color: #00FF00; font-size: 15px; font-weight: bold; line-height: 1.6;
+      color: #00FF00; font-size: 14px; font-weight: bold; line-height: 1.5;
       overflow-y: auto; flex: 1; white-space: pre-wrap; word-break: break-word;
-      background: #050505; padding: 12px; border: 1px solid #222; border-radius: 4px;
+      background: #050505; padding: 10px; border: 1px solid #222; border-radius: 4px;
     }
-    .display-box.japanese .content-area { color: #FFFFFF; font-size: 15px; font-weight: normal; }
+    .display-box.japanese .content-area { color: #FFFFFF; font-size: 14px; font-weight: normal; }
     .side-panel {
-      width: 360px; display: flex; flex-direction: column; gap: 10px;
-      background: #1a1a1a; padding: 12px; border-radius: 8px; border: 1px solid #333;
-      overflow-y: auto; color: #ccc; font-size: 12px;
+      width: 100%; display: flex; flex-direction: column; gap: 8px;
+      background: #1a1a1a; padding: 10px; border-radius: 8px; border: 1px solid #333;
+      overflow-y: auto; color: #ccc; font-size: 11px;
     }
-    h2 { color: #00FF00; font-size: 15px; margin: 0 0 6px 0; display: flex; justify-content: space-between; align-items: center; }
-    .badge { background: #00FF00; color: #000; font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
-    input, select, button { background: #222; border: 1px solid #444; color: #fff; padding: 7px; border-radius: 4px; font-size: 12px; width: 100%; }
-    button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 9px; transition: background 0.2s; }
+    @media (min-width: 768px) {
+      .side-panel { width: 340px; }
+    }
+    h2 { color: #00FF00; font-size: 14px; margin: 0 0 4px 0; display: flex; justify-content: space-between; align-items: center; }
+    .badge { background: #00FF00; color: #000; font-size: 9px; padding: 2px 5px; border-radius: 8px; font-weight: bold; }
+    input, select, button { background: #222; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px; font-size: 12px; width: 100%; }
+    button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 10px; transition: background 0.2s; }
     button:hover { background: #00dd00; color: #000; }
     button.stop-btn { background: #cc3333; }
     button.stop-btn:hover { background: #ff4444; color: #fff; }
-    .status { font-size: 11px; color: #aaa; padding: 6px; background: #080808; border: 1px solid #222; border-radius: 4px; }
-    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 10px; height: 110px; overflow-y: auto; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+    .status { font-size: 10px; color: #aaa; padding: 5px; background: #080808; border: 1px solid #222; border-radius: 4px; }
+    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 9px; height: 80px; overflow-y: auto; padding: 5px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
     
-    .meter-container { background: #000; border: 1px solid #333; height: 12px; border-radius: 6px; overflow: hidden; position: relative; }
+    .meter-container { background: #000; border: 1px solid #333; height: 10px; border-radius: 5px; overflow: hidden; position: relative; }
     .meter-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #00ff00 60%, #ffff00 85%, #ff0000 100%); transition: width 0.05s ease; }
-    .metric-info { display: flex; justify-content: space-between; font-size: 10px; color: #888; margin-top: 2px; }
+    .metric-info { display: flex; justify-content: space-between; font-size: 9px; color: #888; margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -58,18 +65,18 @@
   <div class="main-container">
     <div class="display-box">
       <div class="section-title">【リアルタイム英語文字起こし (WHISPER API)】</div>
-      <div id="transcriptDisplay" class="content-area">(音声入力待機中...)</div>
+      <div id="transcriptDisplay" class="content-area">(マイク入力を開始してください...)</div>
     </div>
     <div class="display-box japanese">
       <div class="section-title">【自然な日本語訳 (GEMINI 文脈補正版)】</div>
-      <div id="translationDisplay" class="content-area">(文脈が揃い次第、翻訳が表示されます...)</div>
+      <div id="translationDisplay" class="content-area">(文章の一区切りごとに翻訳が表示されます...)</div>
     </div>
   </div>
 
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v10.7 VAD</span>
+      <span class="badge">v11.0 MIC</span>
     </h2>
 
     <div>
@@ -87,22 +94,22 @@
       <input type="text" id="modelInput" value="gemini-3.6-flash">
     </div>
 
-    <div style="background:#111; padding:8px; border-radius:6px; border:1px solid #222;">
+    <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
       <div class="meter-container">
         <div id="meterBar" class="meter-bar"></div>
       </div>
       <div class="metric-info">
-        <span>入力レベル</span>
+        <span>マイク感度（音量）</span>
         <span id="speechState" style="color:#00FFFF;">静寂</span>
       </div>
     </div>
 
-    <div style="display:flex; gap:8px;">
-      <button id="startBtn" onclick="startProcessing()">🎤 認識開始</button>
+    <div style="display:flex; gap:6px;">
+      <button id="startBtn" onclick="startProcessing()">🎤 マイク音声認識を開始</button>
       <button id="stopBtn" class="stop-btn" onclick="stopProcessing()" disabled>⏹ 停止</button>
     </div>
 
-    <div style="display:flex; gap:8px;">
+    <div style="display:flex; gap:6px;">
       <button onclick="downloadTranscript()" style="background:#0088cc;">💾 TXT保存</button>
       <button onclick="clearTranscript()" style="background:#444;">🗑️ 表示クリア</button>
     </div>
@@ -114,9 +121,9 @@
 
     <div style="display:flex; justify-content:space-between; align-items:center;">
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
-      <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
+      <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v10.7] Smart VAD & Context Chunking Ready.</div>
+    <div id="logBox" class="log-box">[System v11.0] Mobile/PC Universal Mic Processing Ready.</div>
   </div>
 
   <script>
@@ -130,12 +137,14 @@
     let recordedChunks = [];
     let isSpeaking = false;
     let silenceStart = null;
-    const SILENCE_THRESHOLD = 15; // 音量閾値
-    const SILENCE_DURATION = 1200; // 発話終了とみなす無音時間(ms)
+    
+    // スマホでのマイク拾い・スピーカー集音用に調整したパラメータ
+    const SILENCE_THRESHOLD = 6;  // 小さな声・遠くのスピーカー音も拾えるよう感度を調整
+    const SILENCE_DURATION = 1000; // 発話終了検知の無音判定時間(ms)
 
     let fullTranscript = '';
     let finalJapaneseText = '';
-    let englishBuffer = ''; // Gemini送信用バッファ
+    let englishBuffer = '';
 
     window.addEventListener('DOMContentLoaded', () => {
       const savedOpenaiKey = localStorage.getItem('openai_api_key');
@@ -162,8 +171,23 @@
         return;
       }
 
+      // Key保持
+      localStorage.setItem('openai_api_key', openaiKey);
+      localStorage.setItem('gemini_api_key', geminiKey);
+
       try {
-        audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // スマホマイク・外部マイク双方に対応する設定（エコーキャンセラー等をオフにして講義音を直接拾う）
+        const constraints = {
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: true
+          }
+        };
+
+        audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+        
+        // Web Audio APIのセットアップ
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(audioStream);
         
@@ -174,19 +198,31 @@
         isRunning = true;
         document.getElementById('startBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
-        setStatus("発話待機中 (音声検知オートスタート)");
+        setStatus("マイク監視中 (音声を自動検知)");
 
         initRecorder();
         monitorAudio();
 
       } catch (e) {
-        log("Error", `マイク参照エラー: ${e.message}`);
+        log("Error", `マイクアクセスエラー: ${e.message}`);
+        alert("マイクの使用が許可されていません。ブラウザの権限設定を確認してください。");
       }
     }
 
     function initRecorder() {
       recordedChunks = [];
-      mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+      // ブラウザ互換性のためのmimeType判定
+      let mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported('audio/webm')) {
+        if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          mimeType = 'audio/mp4'; // iOS Safari向け
+        } else {
+          mimeType = ''; // デフォルト
+        }
+      }
+
+      const options = mimeType ? { mimeType } : {};
+      mediaRecorder = new MediaRecorder(audioStream, options);
       
       mediaRecorder.ondataavailable = e => {
         if (e.data.size > 0) recordedChunks.push(e.data);
@@ -194,8 +230,8 @@
 
       mediaRecorder.onstop = async () => {
         if (recordedChunks.length > 0 && isRunning) {
-          const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-          if (audioBlob.size > 5000) { // 極小ノイズを除外
+          const audioBlob = new Blob(recordedChunks, { type: mimeType || 'audio/wav' });
+          if (audioBlob.size > 2000) { 
             processWhisperChunk(audioBlob);
           }
         }
@@ -213,12 +249,12 @@
       const avgVolume = sum / dataArray.length;
 
       const meterBar = document.getElementById('meterBar');
-      meterBar.style.width = Math.min(100, Math.round((avgVolume / 128) * 100)) + '%';
+      meterBar.style.width = Math.min(100, Math.round((avgVolume / 100) * 100)) + '%';
 
       const now = Date.now();
 
       if (avgVolume > SILENCE_THRESHOLD) {
-        document.getElementById('speechState').innerText = "発話検知中...";
+        document.getElementById('speechState').innerText = "音声検知中...";
         document.getElementById('speechState').style.color = "#00FF00";
         silenceStart = null;
 
@@ -254,8 +290,8 @@
       formData.append("file", audioBlob, "audio.webm");
       formData.append("model", "whisper-1");
       formData.append("language", "en");
-      // 定型ハルシネーションの抑制プロンプト
-      formData.append("prompt", "Lecture translation. Avoid generic phrases when quiet.");
+      // 無音時の幻聴防止プロンプト
+      formData.append("prompt", "Transcribing continuous lecture audio without hallucinations.");
 
       try {
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -269,15 +305,17 @@
         const data = await response.json();
         let englishText = data.text ? data.text.trim() : '';
 
-        // ハルシネーションフィルタ
+        // Whisper特有の無音幻聴フィルタリング
         const lower = englishText.toLowerCase();
         if (
           !englishText ||
+          lower.includes("disclaimer") ||
           lower.includes("thanks for watching") ||
           lower.includes("bye-bye") ||
+          lower.includes("subscribe") ||
           lower === "you" || lower === "you."
         ) {
-          log("Whisper", "無音ノイズをスキップしました");
+          log("Whisper", "ノイズ/幻聴データを自動除外しました");
           return;
         }
 
@@ -286,10 +324,10 @@
         renderEnglish();
         log("Whisper", `認識: "${englishText}"`);
 
-        // 文の終わり（. ? !）が含まれるか、一定単語数を超えたらGeminiに送信
-        if (/[.?!]$/.test(englishBuffer) || englishBuffer.split(' ').length >= 8) {
+        // 文末記号があるか、一定以上の単語数に達したらGeminiへ
+        if (/[.?!]$/.test(englishBuffer) || englishBuffer.split(' ').length >= 7) {
           const textToTranslate = englishBuffer;
-          englishBuffer = ''; // バッファクリア
+          englishBuffer = ''; 
           await translateWithGemini(textToTranslate);
         }
 
@@ -303,7 +341,7 @@
       const modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
 
-      const prompt = `Translate this complete lecture phrase into natural Japanese:
+      const prompt = `Translate this lecture phrase into natural, concise Japanese:
 "${englishText}"`;
 
       try {
