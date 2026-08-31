@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v10.4)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v10.5)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -70,7 +70,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v10.4</span>
+      <span class="badge">v10.5</span>
     </h2>
 
     <div>
@@ -135,7 +135,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v10.4] Filter Adjusted.</div>
+    <div id="logBox" class="log-box">[System v10.5] Hallucination Filter Updated.</div>
   </div>
 
   <script>
@@ -317,16 +317,20 @@
         const data = await response.json();
         let englishText = data.text ? data.text.trim() : '';
 
-        // スキップ判定を緩和（無音幻聴の完全一致・特定のシステム指示のみ除外）
-        const exactNoiseList = [
-          "thank you.", "thank you", "you", "you.", "amara.org",
-          "do not output anything if there is silence."
-        ];
+        // Whisperが無音時に生成する定番の無音幻聴パターンを判定
+        const lower = englishText.toLowerCase();
+        const isHallucination = 
+          lower.includes("thanks for watching") ||
+          lower.includes("thank you for watching") ||
+          lower.includes("bye-bye") ||
+          lower.includes("bye bye") ||
+          lower.includes("amara.org") ||
+          lower === "thank you." ||
+          lower === "thank you";
 
-        const isExactNoise = exactNoiseList.includes(englishText.toLowerCase());
         const isOnlyPunctuation = /^[\s\.\,\!\?\-\_]+$/.test(englishText);
 
-        if (englishText && !isExactNoise && !isOnlyPunctuation) {
+        if (englishText && !isHallucination && !isOnlyPunctuation) {
           fullTranscript += (fullTranscript ? ' ' : '') + englishText;
           renderEnglish();
           log("Whisper", `認識成功: "${englishText}"`);
