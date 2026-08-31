@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v11.1 Safety Timer)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v11.2 Fix Prompt)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -76,7 +76,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v11.1 Timer</span>
+      <span class="badge">v11.2 Fix</span>
     </h2>
 
     <div>
@@ -123,7 +123,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v11.1] Max 10s Recording Timer Enabled.</div>
+    <div id="logBox" class="log-box">[System v11.2] Prompt Strict Mode Ready.</div>
   </div>
 
   <script>
@@ -139,9 +139,10 @@
     let silenceStart = null;
     let speechStartTime = null;
 
+    // パラメータ調整
     const SILENCE_THRESHOLD = 8;  
-    const SILENCE_DURATION = 500; // 無音時間（0.5秒へ短縮して応答性向上）
-    const MAX_RECORD_TIME = 5000; // 無音がなくても5秒で強制送信
+    const SILENCE_DURATION = 600; // 0.6秒の無音で区切り
+    const MAX_RECORD_TIME = 6000; // 最大6秒で1回Whisperに送信
 
     let fullTranscript = '';
     let finalJapaneseText = '';
@@ -258,13 +259,11 @@
           mediaRecorder.start();
           setStatus("録音中...");
         } else {
-          // 強制区切りタイマー（10秒以上喋り続けていたら自動切断）
           if (now - speechStartTime > MAX_RECORD_TIME) {
             isSpeaking = false;
             if (mediaRecorder && mediaRecorder.state === "recording") {
               mediaRecorder.stop();
-              setStatus("解析中(10秒到達)...");
-              log("System", "10秒を超えたため自動で音声区切りを送信します");
+              setStatus("解析中...");
             }
           }
         }
@@ -302,11 +301,7 @@
           body: formData
         });
 
-        if (!response.ok) {
-          const errData = await response.json();
-          log("Error", `Whisper APIエラー: ${errData.error?.message || response.statusText}`);
-          return;
-        }
+        if (!response.ok) return;
 
         const data = await response.json();
         let englishText = data.text ? data.text.trim() : '';
@@ -316,27 +311,26 @@
           !englishText ||
           lower.includes("disclaimer") ||
           lower.includes("thanks for watching") ||
-          lower.includes("bye-bye") ||
           lower.includes("subscribe") ||
           lower === "you" || lower === "you."
         ) {
-          log("Whisper", "ノイズ/無音データを自動スキップ");
           return;
         }
 
         fullTranscript += (fullTranscript ? ' ' : '') + englishText;
         englishBuffer += (englishBuffer ? ' ' : '') + englishText;
         renderEnglish();
-        log("Whisper", `認識成功: "${englishText}"`);
+        log("Whisper", englishText);
 
-        if (/[.?!]$/.test(englishBuffer) || englishBuffer.split(' ').length >= 6) {
+        // 7単語以上溜まったらGeminiで翻訳処理を実行
+        if (englishBuffer.split(' ').length >= 7 || /[.?!]$/.test(englishBuffer)) {
           const textToTranslate = englishBuffer;
           englishBuffer = ''; 
           await translateWithGemini(textToTranslate);
         }
 
       } catch (e) {
-        log("Error", `通信エラー: ${e.message}`);
+        log("Error", `Whisper通信エラー: ${e.message}`);
       }
     }
 
@@ -345,8 +339,16 @@
       const modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
 
-      const prompt = `Translate this lecture phrase into natural Japanese:
-"${englishText}"`;
+      // 挨拶・解説・Markdown装飾を絶対に排除する指示
+      const prompt = `You are a professional lecture translator. 
+Translate the following English text into clear, natural Japanese for professional lecture context.
+
+Rules:
+1. Output ONLY the Japanese translation text. 
+2. Do NOT include greetings, intro, explanations, options, or Markdown.
+3. Keep it on a single line.
+
+English: "${englishText}"`;
 
       try {
         const response = await fetch(url, {
@@ -354,16 +356,24 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1 }
+            generationConfig: { 
+              temperature: 0.1,
+              maxOutputTokens: 200
+            }
           })
         });
 
         if (response.ok) {
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
+          
+          // 万が一Markdownヘッダーや余計な改行が含まれていた場合のクリーンアップ
+          translatedText = translatedText.replace(/^#+.*$/gm, '').replace(/\n+/g, ' ').trim();
+
           if (translatedText) {
             finalJapaneseText += (finalJapaneseText ? '\n' : '') + translatedText;
             renderJapanese();
+            log("Gemini", translatedText);
           }
         }
       } catch (e) {
