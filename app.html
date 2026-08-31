@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v10.5)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v10.7 VAD版)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -41,13 +41,12 @@
     h2 { color: #00FF00; font-size: 15px; margin: 0 0 6px 0; display: flex; justify-content: space-between; align-items: center; }
     .badge { background: #00FF00; color: #000; font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
     input, select, button { background: #222; border: 1px solid #444; color: #fff; padding: 7px; border-radius: 4px; font-size: 12px; width: 100%; }
-    input[type="range"] { padding: 0; cursor: pointer; }
     button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 9px; transition: background 0.2s; }
     button:hover { background: #00dd00; color: #000; }
     button.stop-btn { background: #cc3333; }
     button.stop-btn:hover { background: #ff4444; color: #fff; }
     .status { font-size: 11px; color: #aaa; padding: 6px; background: #080808; border: 1px solid #222; border-radius: 4px; }
-    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 10px; height: 90px; overflow-y: auto; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 10px; height: 110px; overflow-y: auto; padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
     
     .meter-container { background: #000; border: 1px solid #333; height: 12px; border-radius: 6px; overflow: hidden; position: relative; }
     .meter-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #00ff00 60%, #ffff00 85%, #ff0000 100%); transition: width 0.05s ease; }
@@ -59,18 +58,18 @@
   <div class="main-container">
     <div class="display-box">
       <div class="section-title">【リアルタイム英語文字起こし (WHISPER API)】</div>
-      <div id="transcriptDisplay" class="content-area">(音声認識を開始してください...)</div>
+      <div id="transcriptDisplay" class="content-area">(音声入力待機中...)</div>
     </div>
     <div class="display-box japanese">
       <div class="section-title">【自然な日本語訳 (GEMINI 文脈補正版)】</div>
-      <div id="translationDisplay" class="content-area">(翻訳結果がここに表示されます...)</div>
+      <div id="translationDisplay" class="content-area">(文脈が揃い次第、翻訳が表示されます...)</div>
     </div>
   </div>
 
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v10.5</span>
+      <span class="badge">v10.7 VAD</span>
     </h2>
 
     <div>
@@ -85,40 +84,22 @@
 
     <div>
       <label style="color:#00FF00; font-weight:bold;">Gemini モデル指定:</label>
-      <input type="text" id="modelInput" value="gemini-3.6-flash" placeholder="gemini-3.6-flash">
-    </div>
-
-    <div>
-      <label style="color:#00FF00; font-weight:bold;">音声送信間隔 (秒):</label>
-      <input type="number" id="intervalSec" value="5" min="2" max="15">
+      <input type="text" id="modelInput" value="gemini-3.6-flash">
     </div>
 
     <div style="background:#111; padding:8px; border-radius:6px; border:1px solid #222;">
-      <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-        <label style="color:#00FF00; font-weight:bold;">マイク増幅感度 (100%〜500%):</label>
-        <span id="gainValue" style="color:#fff;">200%</span>
+      <div class="meter-container">
+        <div id="meterBar" class="meter-bar"></div>
       </div>
-      <input type="range" id="gainSlider" min="0.5" max="5.0" step="0.1" value="2.0" oninput="updateGain(this.value)">
-
-      <div style="margin-top:8px;">
-        <div class="meter-container">
-          <div id="meterBar" class="meter-bar"></div>
-        </div>
-        <div class="metric-info">
-          <span>収音レベル</span>
-          <span>直近送信サイズ: <strong id="dataSizeDisplay" style="color:#00FFFF;">0.0 KB</strong></span>
-        </div>
+      <div class="metric-info">
+        <span>入力レベル</span>
+        <span id="speechState" style="color:#00FFFF;">静寂</span>
       </div>
     </div>
 
     <div style="display:flex; gap:8px;">
       <button id="startBtn" onclick="startProcessing()">🎤 認識開始</button>
       <button id="stopBtn" class="stop-btn" onclick="stopProcessing()" disabled>⏹ 停止</button>
-    </div>
-
-    <div style="display:flex; gap:8px;">
-      <button id="ttsBtn" onclick="toggleContinuousTTS()" style="background:#00aaff; color:#000;">🔊 最新から連続朗読</button>
-      <button onclick="stopSpeaking()" style="background:#882222; width:40%;">⏹ 読上停止</button>
     </div>
 
     <div style="display:flex; gap:8px;">
@@ -135,171 +116,146 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:10px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v10.5] Hallucination Filter Updated.</div>
+    <div id="logBox" class="log-box">[System v10.7] Smart VAD & Context Chunking Ready.</div>
   </div>
 
   <script>
     let isRunning = false;
     let audioStream = null;
-    let mediaRecorder = null;
     let audioContext = null;
-    let gainNode = null;
     let analyser = null;
     let animFrameId = null;
 
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let isSpeaking = false;
+    let silenceStart = null;
+    const SILENCE_THRESHOLD = 15; // 音量閾値
+    const SILENCE_DURATION = 1200; // 発話終了とみなす無音時間(ms)
+
     let fullTranscript = '';
     let finalJapaneseText = '';
-
-    let ttsQueue = [];
-    let isTtsActive = false;
-    let isSpeakingNow = false;
+    let englishBuffer = ''; // Gemini送信用バッファ
 
     window.addEventListener('DOMContentLoaded', () => {
       const savedOpenaiKey = localStorage.getItem('openai_api_key');
       if (savedOpenaiKey) document.getElementById('openaiKey').value = savedOpenaiKey;
-
       const savedGeminiKey = localStorage.getItem('gemini_api_key');
       if (savedGeminiKey) document.getElementById('geminiKey').value = savedGeminiKey;
-
-      const savedModel = localStorage.getItem('gemini_model_name');
-      if (savedModel) document.getElementById('modelInput').value = savedModel;
-    });
-
-    document.getElementById('openaiKey').addEventListener('change', (e) => {
-      localStorage.setItem('openai_api_key', e.target.value.trim());
-    });
-
-    document.getElementById('geminiKey').addEventListener('change', (e) => {
-      localStorage.setItem('gemini_api_key', e.target.value.trim());
-    });
-
-    document.getElementById('modelInput').addEventListener('change', (e) => {
-      localStorage.setItem('gemini_model_name', e.target.value.trim());
     });
 
     function log(tag, msg) {
       const timeStr = new Date().toLocaleTimeString();
       const logBox = document.getElementById('logBox');
-      if (logBox) {
-        logBox.innerText = `[${timeStr}] [${tag}] ${msg}\n` + logBox.innerText;
-      }
+      if (logBox) logBox.innerText = `[${timeStr}] [${tag}] ${msg}\n` + logBox.innerText;
     }
 
     function setStatus(msg) {
-      const statusEl = document.getElementById('status');
-      if (statusEl) statusEl.innerText = msg;
-    }
-
-    function updateGain(val) {
-      document.getElementById('gainValue').innerText = Math.round(val * 100) + '%';
-      if (gainNode) {
-        gainNode.gain.value = parseFloat(val);
-      }
+      document.getElementById('status').innerText = msg;
     }
 
     async function startProcessing() {
       const openaiKey = document.getElementById('openaiKey').value.trim();
       const geminiKey = document.getElementById('geminiKey').value.trim();
-
       if (!openaiKey || !geminiKey) {
-        alert("OpenAI API Key と Gemini API Key の両方を入力してください。");
+        alert("API Keyを入力してください。");
         return;
       }
 
       try {
         audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(audioStream);
         
-        gainNode = audioContext.createGain();
-        const initialGain = parseFloat(document.getElementById('gainSlider').value);
-        gainNode.gain.value = initialGain;
-
         analyser = audioContext.createAnalyser();
         analyser.fftSize = 256;
-
-        const destination = audioContext.createMediaStreamDestination();
-
-        source.connect(gainNode);
-        gainNode.connect(analyser);
-        gainNode.connect(destination);
-
-        drawMeter();
+        source.connect(analyser);
 
         isRunning = true;
-
         document.getElementById('startBtn').disabled = true;
         document.getElementById('stopBtn').disabled = false;
-        setStatus("録音・解析中... (マイクON)");
-        log("System", "マイク録音・オーディオモニターを開始しました");
+        setStatus("発話待機中 (音声検知オートスタート)");
 
-        const intervalMs = parseInt(document.getElementById('intervalSec').value) * 1000;
-        recordAndProcessChunk(destination.stream, openaiKey, geminiKey, intervalMs);
+        initRecorder();
+        monitorAudio();
 
       } catch (e) {
-        log("Error", `マイク起動エラー: ${e.message}`);
-        setStatus("エラー: マイク起動失敗");
+        log("Error", `マイク参照エラー: ${e.message}`);
       }
     }
 
-    function drawMeter() {
-      if (!analyser) return;
+    function initRecorder() {
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(audioStream, { mimeType: 'audio/webm' });
+      
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        if (recordedChunks.length > 0 && isRunning) {
+          const audioBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+          if (audioBlob.size > 5000) { // 極小ノイズを除外
+            processWhisperChunk(audioBlob);
+          }
+        }
+      };
+    }
+
+    function monitorAudio() {
+      if (!analyser || !isRunning) return;
+
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       analyser.getByteFrequencyData(dataArray);
 
       let sum = 0;
-      for (let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i];
-      }
-      const average = sum / dataArray.length;
-      const volumePercent = Math.min(100, Math.round((average / 128) * 100));
+      for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+      const avgVolume = sum / dataArray.length;
 
       const meterBar = document.getElementById('meterBar');
-      if (meterBar) {
-        meterBar.style.width = volumePercent + '%';
+      meterBar.style.width = Math.min(100, Math.round((avgVolume / 128) * 100)) + '%';
+
+      const now = Date.now();
+
+      if (avgVolume > SILENCE_THRESHOLD) {
+        document.getElementById('speechState').innerText = "発話検知中...";
+        document.getElementById('speechState').style.color = "#00FF00";
+        silenceStart = null;
+
+        if (!isSpeaking) {
+          isSpeaking = true;
+          initRecorder();
+          mediaRecorder.start();
+          setStatus("録音中...");
+        }
+      } else {
+        document.getElementById('speechState').innerText = "静寂";
+        document.getElementById('speechState').style.color = "#888";
+
+        if (isSpeaking) {
+          if (!silenceStart) silenceStart = now;
+
+          if (now - silenceStart > SILENCE_DURATION) {
+            isSpeaking = false;
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+              mediaRecorder.stop();
+              setStatus("解析中...");
+            }
+          }
+        }
       }
 
-      if (isRunning) {
-        animFrameId = requestAnimationFrame(drawMeter);
-      }
+      if (isRunning) animFrameId = requestAnimationFrame(monitorAudio);
     }
 
-    function recordAndProcessChunk(processedStream, openaiKey, geminiKey, duration) {
-      if (!isRunning) return;
-
-      const chunks = [];
-      mediaRecorder = new MediaRecorder(processedStream, { mimeType: 'audio/webm' });
-
-      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
-
-      mediaRecorder.onstop = async () => {
-        if (chunks.length > 0 && isRunning) {
-          const audioBlob = new Blob(chunks, { type: 'audio/webm' });
-          
-          const sizeInKB = (audioBlob.size / 1024).toFixed(1);
-          document.getElementById('dataSizeDisplay').innerText = `${sizeInKB} KB`;
-
-          processWhisperAndTranslate(audioBlob, openaiKey, geminiKey);
-        }
-        if (isRunning) {
-          recordAndProcessChunk(processedStream, openaiKey, geminiKey, duration);
-        }
-      };
-
-      mediaRecorder.start();
-      setTimeout(() => {
-        if (mediaRecorder && mediaRecorder.state === "recording") {
-          mediaRecorder.stop();
-        }
-      }, duration);
-    }
-
-    async function processWhisperAndTranslate(audioBlob, openaiKey, geminiKey) {
+    async function processWhisperChunk(audioBlob) {
+      const openaiKey = document.getElementById('openaiKey').value.trim();
       const formData = new FormData();
       formData.append("file", audioBlob, "audio.webm");
       formData.append("model", "whisper-1");
       formData.append("language", "en");
+      // 定型ハルシネーションの抑制プロンプト
+      formData.append("prompt", "Lecture translation. Avoid generic phrases when quiet.");
 
       try {
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -308,50 +264,46 @@
           body: formData
         });
 
-        if (!response.ok) {
-          const errData = await response.json();
-          log("Whisper Error", errData.error?.message || response.statusText);
-          return;
-        }
+        if (!response.ok) return;
 
         const data = await response.json();
         let englishText = data.text ? data.text.trim() : '';
 
-        // Whisperが無音時に生成する定番の無音幻聴パターンを判定
+        // ハルシネーションフィルタ
         const lower = englishText.toLowerCase();
-        const isHallucination = 
+        if (
+          !englishText ||
           lower.includes("thanks for watching") ||
-          lower.includes("thank you for watching") ||
           lower.includes("bye-bye") ||
-          lower.includes("bye bye") ||
-          lower.includes("amara.org") ||
-          lower === "thank you." ||
-          lower === "thank you";
-
-        const isOnlyPunctuation = /^[\s\.\,\!\?\-\_]+$/.test(englishText);
-
-        if (englishText && !isHallucination && !isOnlyPunctuation) {
-          fullTranscript += (fullTranscript ? ' ' : '') + englishText;
-          renderEnglish();
-          log("Whisper", `認識成功: "${englishText}"`);
-
-          await translateWithGemini(englishText, geminiKey);
-        } else {
-          log("Whisper", "無音またはノイズをスキップしました");
+          lower === "you" || lower === "you."
+        ) {
+          log("Whisper", "無音ノイズをスキップしました");
+          return;
         }
+
+        fullTranscript += (fullTranscript ? ' ' : '') + englishText;
+        englishBuffer += (englishBuffer ? ' ' : '') + englishText;
+        renderEnglish();
+        log("Whisper", `認識: "${englishText}"`);
+
+        // 文の終わり（. ? !）が含まれるか、一定単語数を超えたらGeminiに送信
+        if (/[.?!]$/.test(englishBuffer) || englishBuffer.split(' ').length >= 8) {
+          const textToTranslate = englishBuffer;
+          englishBuffer = ''; // バッファクリア
+          await translateWithGemini(textToTranslate);
+        }
+
       } catch (e) {
-        log("Error", `Whisper 通信エラー: ${e.message}`);
+        log("Error", `Whisperエラー: ${e.message}`);
       }
     }
 
-    async function translateWithGemini(englishText, geminiKey) {
-      let modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
+    async function translateWithGemini(englishText) {
+      const geminiKey = document.getElementById('geminiKey').value.trim();
+      const modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
 
-      const prompt = `Translate the following English presentation/lecture segment into clear, natural, and fluent Japanese.
-Output ONLY the translated Japanese text. Do NOT include original English, explanations, or quotes.
-
-English:
+      const prompt = `Translate this complete lecture phrase into natural Japanese:
 "${englishText}"`;
 
       try {
@@ -360,148 +312,65 @@ English:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 300 }
+            generationConfig: { temperature: 0.1 }
           })
         });
 
         if (response.ok) {
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-
-          translatedText = translatedText.replace(/[a-zA-Z]{3,}/g, '');
-          translatedText = translatedText.replace(/^[`"'\s\-*:]+|[`"'\s\-*:]+$/g, '');
-
-          if (translatedText.trim()) {
+          if (translatedText) {
             finalJapaneseText += (finalJapaneseText ? '\n' : '') + translatedText;
             renderJapanese();
-
-            if (isTtsActive) {
-              ttsQueue.push(translatedText);
-              processTtsQueue();
-            }
           }
-        } else {
-          const errData = await response.json();
-          log("Gemini Error", errData.error?.message || response.statusText);
         }
       } catch (e) {
-        log("Error", `Gemini 通信エラー: ${e.message}`);
+        log("Error", `Geminiエラー: ${e.message}`);
       }
     }
 
     function renderEnglish() {
-      const enDisplay = document.getElementById('transcriptDisplay');
-      if (enDisplay) {
-        enDisplay.innerText = fullTranscript || '(音声認識を開始してください...)';
-        enDisplay.scrollTop = enDisplay.scrollHeight;
-      }
+      const el = document.getElementById('transcriptDisplay');
+      el.innerText = fullTranscript;
+      el.scrollTop = el.scrollHeight;
     }
 
     function renderJapanese() {
-      const jaDisplay = document.getElementById('translationDisplay');
-      if (jaDisplay) {
-        jaDisplay.innerText = finalJapaneseText || '(翻訳結果がここに表示されます...)';
-        jaDisplay.scrollTop = jaDisplay.scrollHeight;
-      }
+      const el = document.getElementById('translationDisplay');
+      el.innerText = finalJapaneseText;
+      el.scrollTop = el.scrollHeight;
     }
 
     function stopProcessing() {
       isRunning = false;
       if (animFrameId) cancelAnimationFrame(animFrameId);
       if (audioContext) audioContext.close();
-      if (audioStream) {
-        audioStream.getTracks().forEach(track => track.stop());
-      }
-      
-      const meterBar = document.getElementById('meterBar');
-      if (meterBar) meterBar.style.width = '0%';
+      if (audioStream) audioStream.getTracks().forEach(t => t.stop());
 
-      stopSpeaking();
       setStatus("停止中");
       document.getElementById('startBtn').disabled = false;
       document.getElementById('stopBtn').disabled = true;
-      log("System", "処理を停止しました");
-    }
-
-    function toggleContinuousTTS() {
-      if (isTtsActive) stopSpeaking();
-      else startContinuousTTS();
-    }
-
-    function startContinuousTTS() {
-      if (!('speechSynthesis' in window)) return;
-      isTtsActive = true;
-      ttsQueue = [];
-      const lines = finalJapaneseText.trim().split('\n').filter(l => l.trim().length > 0);
-      if (lines.length > 0) ttsQueue.push(lines[lines.length - 1]);
-
-      const btn = document.getElementById('ttsBtn');
-      if (btn) {
-        btn.innerText = "🔊 連続朗読中 (タップで停止)";
-        btn.style.background = "#ff9900";
-      }
-      log("TTS", "朗読を開始しました");
-      processTtsQueue();
-    }
-
-    function processTtsQueue() {
-      if (!isTtsActive || isSpeakingNow || ttsQueue.length === 0) return;
-      const textToSpeak = ttsQueue.shift();
-      isSpeakingNow = true;
-
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
-      utterance.lang = 'ja-JP';
-      utterance.rate = 1.0;
-
-      utterance.onend = () => {
-        isSpeakingNow = false;
-        if (isTtsActive) processTtsQueue();
-      };
-      utterance.onerror = (e) => {
-        log("Error", `読上げエラー: ${e.error}`);
-        isSpeakingNow = false;
-        if (isTtsActive) processTtsQueue();
-      };
-
-      window.speechSynthesis.speak(utterance);
-    }
-
-    function stopSpeaking() {
-      isTtsActive = false;
-      isSpeakingNow = false;
-      ttsQueue = [];
-      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-      const btn = document.getElementById('ttsBtn');
-      if (btn) {
-        btn.innerText = "🔊 最新から連続朗読";
-        btn.style.background = "#00aaff";
-      }
-      log("TTS", "朗読を停止しました");
     }
 
     function clearTranscript() {
-      stopSpeaking();
       fullTranscript = '';
       finalJapaneseText = '';
+      englishBuffer = '';
       renderEnglish();
       renderJapanese();
     }
 
     function clearLog() {
-      const logBox = document.getElementById('logBox');
-      if (logBox) logBox.innerText = '[Cleared]';
+      document.getElementById('logBox').innerText = '[Cleared]';
     }
 
-    async function downloadTranscript() {
-      if (!fullTranscript && !finalJapaneseText) return;
-      const fileContent = `【英文講義テキスト (Whisper)】\n${fullTranscript}\n\n【日本語訳 (Gemini)】\n${finalJapaneseText}`;
+    function downloadTranscript() {
+      const fileContent = `【英文】\n${fullTranscript}\n\n【和訳】\n${finalJapaneseText}`;
       const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url;
-      a.download = `lecture_transcript_${Date.now()}.txt`;
+      a.href = URL.createObjectURL(blob);
+      a.download = `lecture_${Date.now()}.txt`;
       a.click();
-      URL.revokeObjectURL(url);
     }
   </script>
 </body>
