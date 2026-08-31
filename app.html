@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v12.2 Strict Translation)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v12.3 System Prompt Clean)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -76,7 +76,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v12.2 Strict</span>
+      <span class="badge">v12.3 Clean</span>
     </h2>
 
     <div>
@@ -125,7 +125,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v12.2] Enhanced punctuation & Strict translation rules loaded.</div>
+    <div id="logBox" class="log-box">[System v12.3] System instruction separated. Clean translation mode ready.</div>
   </div>
 
   <script>
@@ -346,7 +346,7 @@
       formData.append("file", audioBlob, "audio.webm");
       formData.append("model", "whisper-1");
       formData.append("language", "en");
-      // Whisperに明確なピリオド・カンマを含むよう強力に誘導
+      // Whisperに明確な句読点（ピリオド・カンマ）を含むテキストを出力させる誘導
       formData.append("prompt", "This is a continuous English speech. Use proper punctuation like periods and commas.");
 
       try {
@@ -403,23 +403,20 @@
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${geminiKey}`;
 
       const contextText = recentEnglishHistory.length > 0 
-        ? `【これまでの文脈】\n${recentEnglishHistory.join(' ')}\n\n`
+        ? `[Previous Context: ${recentEnglishHistory.join(' ')}]`
         : '';
 
-      const prompt = `あなたはプロの同時通訳者です。
-以下の英語スピーチを、文脈に沿った自然でスムーズな日本語の「書き言葉（一人称は『私』）」に翻訳してください。
-
-${contextText}【絶対ルール】
-1. 訳文となる日本語の文章「のみ」を出力してください。
-2. 「/提出」や「〜など」「単語の意味」といった解説・選択肢・単語リストの出力は絶対に禁止です。
-3. 途切れた文章でも、文脈に合うよう自然な日本語として補正してください。
-
-対象の英語: "${englishText}"
-日本語訳:`;
-
+      // API構造の正当化: システムプロンプトとユーザーコンテンツを完全に分離
       const requestBody = {
+        systemInstruction: {
+          parts: [{
+            text: "You are a professional simultaneous interpreter. Translate the given English speech into natural, fluent Japanese suitable for a lecture transcript. Output ONLY the translated Japanese text. Never output explanations, multiple choices, notes, rules, markdown symbols, or bullet points."
+          }]
+        },
         contents: [{
-          parts: [{ text: prompt }]
+          parts: [{
+            text: `${contextText}\nTranslate this English speech into Japanese:\n"${englishText}"`
+          }]
         }],
         generationConfig: { 
           temperature: 0.1,
@@ -438,9 +435,11 @@ ${contextText}【絶対ルール】
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
           
+          // 万が一残ったメタ記述やプロンプト漏れの安全な除外処理
           translatedText = translatedText
             .replace(/^日本語訳[:：]?/g, '')
-            .replace(/^#+.*$/gm, '')
+            .replace(/^\*.*$/gm, '')
+            .replace(/^\d+\..*$/gm, '')
             .replace(/^["'「」]/g, '')
             .replace(/["'「」]$/g, '')
             .trim();
@@ -451,7 +450,7 @@ ${contextText}【絶対ルール】
             log("Gemini", translatedText);
 
             recentEnglishHistory.push(englishText);
-            if (recentEnglishHistory.length > 3) recentEnglishHistory.shift();
+            if (recentEnglishHistory.length > 2) recentEnglishHistory.shift();
           }
         } else {
           const err = await response.json();
