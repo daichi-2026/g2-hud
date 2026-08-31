@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v11.0 Hybrid)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v11.1 Safety Timer)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -76,7 +76,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v11.0 MIC</span>
+      <span class="badge">v11.1 Timer</span>
     </h2>
 
     <div>
@@ -123,7 +123,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v11.0] Mobile/PC Universal Mic Processing Ready.</div>
+    <div id="logBox" class="log-box">[System v11.1] Max 10s Recording Timer Enabled.</div>
   </div>
 
   <script>
@@ -137,10 +137,11 @@
     let recordedChunks = [];
     let isSpeaking = false;
     let silenceStart = null;
-    
-    // スマホでのマイク拾い・スピーカー集音用に調整したパラメータ
-    const SILENCE_THRESHOLD = 6;  // 小さな声・遠くのスピーカー音も拾えるよう感度を調整
-    const SILENCE_DURATION = 1000; // 発話終了検知の無音判定時間(ms)
+    let speechStartTime = null;
+
+    const SILENCE_THRESHOLD = 8;  
+    const SILENCE_DURATION = 500; // 無音時間（0.5秒へ短縮して応答性向上）
+    const MAX_RECORD_TIME = 5000; // 無音がなくても5秒で強制送信
 
     let fullTranscript = '';
     let finalJapaneseText = '';
@@ -171,12 +172,10 @@
         return;
       }
 
-      // Key保持
       localStorage.setItem('openai_api_key', openaiKey);
       localStorage.setItem('gemini_api_key', geminiKey);
 
       try {
-        // スマホマイク・外部マイク双方に対応する設定（エコーキャンセラー等をオフにして講義音を直接拾う）
         const constraints = {
           audio: {
             echoCancellation: false,
@@ -186,8 +185,6 @@
         };
 
         audioStream = await navigator.mediaDevices.getUserMedia(constraints);
-        
-        // Web Audio APIのセットアップ
         audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const source = audioContext.createMediaStreamSource(audioStream);
         
@@ -205,20 +202,16 @@
 
       } catch (e) {
         log("Error", `マイクアクセスエラー: ${e.message}`);
-        alert("マイクの使用が許可されていません。ブラウザの権限設定を確認してください。");
+        alert("マイクの使用が許可されていません。");
       }
     }
 
     function initRecorder() {
       recordedChunks = [];
-      // ブラウザ互換性のためのmimeType判定
       let mimeType = 'audio/webm';
       if (!MediaRecorder.isTypeSupported('audio/webm')) {
-        if (MediaRecorder.isTypeSupported('audio/mp4')) {
-          mimeType = 'audio/mp4'; // iOS Safari向け
-        } else {
-          mimeType = ''; // デフォルト
-        }
+        if (MediaRecorder.isTypeSupported('audio/mp4')) mimeType = 'audio/mp4';
+        else mimeType = '';
       }
 
       const options = mimeType ? { mimeType } : {};
@@ -260,9 +253,20 @@
 
         if (!isSpeaking) {
           isSpeaking = true;
+          speechStartTime = now;
           initRecorder();
           mediaRecorder.start();
           setStatus("録音中...");
+        } else {
+          // 強制区切りタイマー（10秒以上喋り続けていたら自動切断）
+          if (now - speechStartTime > MAX_RECORD_TIME) {
+            isSpeaking = false;
+            if (mediaRecorder && mediaRecorder.state === "recording") {
+              mediaRecorder.stop();
+              setStatus("解析中(10秒到達)...");
+              log("System", "10秒を超えたため自動で音声区切りを送信します");
+            }
+          }
         }
       } else {
         document.getElementById('speechState').innerText = "静寂";
@@ -290,8 +294,6 @@
       formData.append("file", audioBlob, "audio.webm");
       formData.append("model", "whisper-1");
       formData.append("language", "en");
-      // 無音時の幻聴防止プロンプト
-      formData.append("prompt", "Transcribing continuous lecture audio without hallucinations.");
 
       try {
         const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -300,12 +302,15 @@
           body: formData
         });
 
-        if (!response.ok) return;
+        if (!response.ok) {
+          const errData = await response.json();
+          log("Error", `Whisper APIエラー: ${errData.error?.message || response.statusText}`);
+          return;
+        }
 
         const data = await response.json();
         let englishText = data.text ? data.text.trim() : '';
 
-        // Whisper特有の無音幻聴フィルタリング
         const lower = englishText.toLowerCase();
         if (
           !englishText ||
@@ -315,24 +320,23 @@
           lower.includes("subscribe") ||
           lower === "you" || lower === "you."
         ) {
-          log("Whisper", "ノイズ/幻聴データを自動除外しました");
+          log("Whisper", "ノイズ/無音データを自動スキップ");
           return;
         }
 
         fullTranscript += (fullTranscript ? ' ' : '') + englishText;
         englishBuffer += (englishBuffer ? ' ' : '') + englishText;
         renderEnglish();
-        log("Whisper", `認識: "${englishText}"`);
+        log("Whisper", `認識成功: "${englishText}"`);
 
-        // 文末記号があるか、一定以上の単語数に達したらGeminiへ
-        if (/[.?!]$/.test(englishBuffer) || englishBuffer.split(' ').length >= 7) {
+        if (/[.?!]$/.test(englishBuffer) || englishBuffer.split(' ').length >= 6) {
           const textToTranslate = englishBuffer;
           englishBuffer = ''; 
           await translateWithGemini(textToTranslate);
         }
 
       } catch (e) {
-        log("Error", `Whisperエラー: ${e.message}`);
+        log("Error", `通信エラー: ${e.message}`);
       }
     }
 
@@ -341,7 +345,7 @@
       const modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
 
-      const prompt = `Translate this lecture phrase into natural, concise Japanese:
+      const prompt = `Translate this lecture phrase into natural Japanese:
 "${englishText}"`;
 
       try {
