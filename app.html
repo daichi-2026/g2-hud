@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v11.4)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v12.0 Auto Model)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -76,7 +76,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v11.4</span>
+      <span class="badge">v12.0 Auto</span>
     </h2>
 
     <div>
@@ -86,12 +86,14 @@
 
     <div>
       <label style="color:#00FF00; font-weight:bold;">Gemini API Key (翻訳用):</label>
-      <input type="password" id="geminiKey" placeholder="AIzaSy...">
+      <input type="password" id="geminiKey" placeholder="AIzaSy..." onchange="fetchAvailableModels()">
     </div>
 
     <div>
-      <label style="color:#00FF00; font-weight:bold;">Gemini モデル指定:</label>
-      <input type="text" id="modelInput" value="gemini-3.6-flash">
+      <label style="color:#00FF00; font-weight:bold;">Gemini モデル選択 (自動取得):</label>
+      <select id="modelSelect">
+        <option value="">API Key入力後に自動読み込み...</option>
+      </select>
     </div>
 
     <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
@@ -123,7 +125,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v11.4] Model updated to gemini-3.6-flash with Strict Prompt.</div>
+    <div id="logBox" class="log-box">[System v12.0] Dynamic Model Fetcher Initialized.</div>
   </div>
 
   <script>
@@ -150,8 +152,12 @@
     window.addEventListener('DOMContentLoaded', () => {
       const savedOpenaiKey = localStorage.getItem('openai_api_key');
       if (savedOpenaiKey) document.getElementById('openaiKey').value = savedOpenaiKey;
+      
       const savedGeminiKey = localStorage.getItem('gemini_api_key');
-      if (savedGeminiKey) document.getElementById('geminiKey').value = savedGeminiKey;
+      if (savedGeminiKey) {
+        document.getElementById('geminiKey').value = savedGeminiKey;
+        fetchAvailableModels(); // 保存されたキーがある場合は自動でモデル一覧を取得
+      }
     });
 
     function log(tag, msg) {
@@ -164,6 +170,51 @@
       document.getElementById('status').innerText = msg;
     }
 
+    // 利用可能なモデル一覧を動的に取得してドロップダウンを更新する処理
+    async function fetchAvailableModels() {
+      const geminiKey = document.getElementById('geminiKey').value.trim();
+      if (!geminiKey) return;
+
+      const selectEl = document.getElementById('modelSelect');
+      
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`);
+        if (!res.ok) {
+          log("Error", "モデル一覧の取得に失敗しました。API Keyを確認してください。");
+          return;
+        }
+
+        const data = await res.json();
+        // generateContent に対応しているモデルのみ抽出
+        const generateModels = (data.models || [])
+          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
+          .map(m => m.name.replace("models/", ""));
+
+        if (generateModels.length > 0) {
+          selectEl.innerHTML = ""; 
+          let defaultSelected = false;
+
+          generateModels.forEach(model => {
+            const opt = document.createElement("option");
+            opt.value = model;
+            opt.textContent = model;
+            
+            // "flash" が含まれる最新モデルをデフォルト選択（なければ最初のモデル）
+            if (model.includes("flash") && !defaultSelected) {
+              opt.selected = true;
+              defaultSelected = true;
+            }
+            selectEl.appendChild(opt);
+          });
+
+          if (!defaultSelected) selectEl.selectedIndex = 0;
+          log("System", `利用可能なGeminiモデル（${generateModels.length}件）を取得しました。`);
+        }
+      } catch (e) {
+        log("Error", `モデル一覧取得エラー: ${e.message}`);
+      }
+    }
+
     async function startProcessing() {
       const openaiKey = document.getElementById('openaiKey').value.trim();
       const geminiKey = document.getElementById('geminiKey').value.trim();
@@ -174,6 +225,12 @@
 
       localStorage.setItem('openai_api_key', openaiKey);
       localStorage.setItem('gemini_api_key', geminiKey);
+
+      // モデル未取得の場合は開始時に取得を試みる
+      const selectEl = document.getElementById('modelSelect');
+      if (!selectEl.value || selectEl.value.includes("自動読み込み")) {
+        await fetchAvailableModels();
+      }
 
       try {
         const constraints = {
@@ -334,10 +391,15 @@
 
     async function translateWithGemini(englishText) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
-      const modelName = document.getElementById('modelInput').value.trim() || 'gemini-3.6-flash';
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiKey}`;
+      const selectedModel = document.getElementById('modelSelect').value;
 
-      // gemini-3.6-flash 向けの強力なワンショット翻訳プロンプト
+      if (!selectedModel) {
+        log("Error", "有効なGeminiモデルが選択されていません。");
+        return;
+      }
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${geminiKey}`;
+
       const prompt = `[Task] Translate English to Japanese.
 [Constraint] Output ONLY the natural Japanese translation string. Absolutely NO explanations, NO notes, NO markdown formatting, NO choices, NO greetings.
 
@@ -365,7 +427,6 @@ Japanese:`;
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
           
-          // 余分な解説行・記号の強力除去処理
           translatedText = translatedText
             .split('\n')[0] 
             .replace(/^#+.*$/g, '')
