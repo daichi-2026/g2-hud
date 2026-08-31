@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v12.0 Auto Model)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v12.1 Context Aware)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -76,7 +76,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v12.0 Auto</span>
+      <span class="badge">v12.1 Context</span>
     </h2>
 
     <div>
@@ -125,7 +125,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v12.0] Dynamic Model Fetcher Initialized.</div>
+    <div id="logBox" class="log-box">[System v12.1] Sentence-boundary & Context-aware translation ready.</div>
   </div>
 
   <script>
@@ -148,6 +148,7 @@
     let fullTranscript = '';
     let finalJapaneseText = '';
     let englishBuffer = '';
+    let recentEnglishHistory = []; // 文脈保持用バッファ（直前3文）
 
     window.addEventListener('DOMContentLoaded', () => {
       const savedOpenaiKey = localStorage.getItem('openai_api_key');
@@ -156,7 +157,7 @@
       const savedGeminiKey = localStorage.getItem('gemini_api_key');
       if (savedGeminiKey) {
         document.getElementById('geminiKey').value = savedGeminiKey;
-        fetchAvailableModels(); // 保存されたキーがある場合は自動でモデル一覧を取得
+        fetchAvailableModels();
       }
     });
 
@@ -170,7 +171,6 @@
       document.getElementById('status').innerText = msg;
     }
 
-    // 利用可能なモデル一覧を動的に取得してドロップダウンを更新する処理
     async function fetchAvailableModels() {
       const geminiKey = document.getElementById('geminiKey').value.trim();
       if (!geminiKey) return;
@@ -185,7 +185,6 @@
         }
 
         const data = await res.json();
-        // generateContent に対応しているモデルのみ抽出
         const generateModels = (data.models || [])
           .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
           .map(m => m.name.replace("models/", ""));
@@ -199,7 +198,6 @@
             opt.value = model;
             opt.textContent = model;
             
-            // "flash" が含まれる最新モデルをデフォルト選択（なければ最初のモデル）
             if (model.includes("flash") && !defaultSelected) {
               opt.selected = true;
               defaultSelected = true;
@@ -226,7 +224,6 @@
       localStorage.setItem('openai_api_key', openaiKey);
       localStorage.setItem('gemini_api_key', geminiKey);
 
-      // モデル未取得の場合は開始時に取得を試みる
       const selectEl = document.getElementById('modelSelect');
       if (!selectEl.value || selectEl.value.includes("自動読み込み")) {
         await fetchAvailableModels();
@@ -378,7 +375,11 @@
         renderEnglish();
         log("Whisper", englishText);
 
-        if (englishBuffer.split(' ').length >= 7 || /[.?!]$/.test(englishBuffer)) {
+        // 【改善】単語数ではなく、ピリオド等の文章終端判定 or 18単語以上の蓄積でGeminiへ
+        const words = englishBuffer.split(/\s+/);
+        const hasSentenceEnd = /[.?!]\s*$/.test(englishBuffer);
+
+        if (hasSentenceEnd || words.length >= 18) {
           const textToTranslate = englishBuffer;
           englishBuffer = ''; 
           await translateWithGemini(textToTranslate);
@@ -400,11 +401,20 @@
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${geminiKey}`;
 
-      const prompt = `[Task] Translate English to Japanese.
-[Constraint] Output ONLY the natural Japanese translation string. Absolutely NO explanations, NO notes, NO markdown formatting, NO choices, NO greetings.
+      // 直前3文の文脈をプロンプトへ組み込む
+      const contextText = recentEnglishHistory.length > 0 
+        ? `【直前の文脈】\n${recentEnglishHistory.join(' ')}\n\n`
+        : '';
 
-English: "${englishText}"
-Japanese:`;
+      const prompt = `あなたは優秀なリアルタイム講義通訳者です。
+${contextText}以下の英語スピーチを、前後の文脈に合致する自然で読みやすい日本語に翻訳してください。
+
+【制約事項】
+・翻訳結果の日本語文字列のみを出力してください。
+・挨拶、解説、記号補足、Markdown出力は一切禁止します。
+
+対象の英語: "${englishText}"
+日本語:`;
 
       const requestBody = {
         contents: [{
@@ -412,7 +422,7 @@ Japanese:`;
         }],
         generationConfig: { 
           temperature: 0.1,
-          maxOutputTokens: 150
+          maxOutputTokens: 250
         }
       };
 
@@ -428,8 +438,7 @@ Japanese:`;
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
           
           translatedText = translatedText
-            .split('\n')[0] 
-            .replace(/^#+.*$/g, '')
+            .replace(/^#+.*$/gm, '')
             .replace(/^["'「」]/g, '')
             .replace(/["'「」]$/g, '')
             .trim();
@@ -438,6 +447,10 @@ Japanese:`;
             finalJapaneseText += (finalJapaneseText ? '\n' : '') + translatedText;
             renderJapanese();
             log("Gemini", translatedText);
+
+            // 履歴に保持（最大3文まで）
+            recentEnglishHistory.push(englishText);
+            if (recentEnglishHistory.length > 3) recentEnglishHistory.shift();
           }
         } else {
           const err = await response.json();
@@ -466,6 +479,12 @@ Japanese:`;
       if (audioContext) audioContext.close();
       if (audioStream) audioStream.getTracks().forEach(t => t.stop());
 
+      // 残りのバッファがあれば停止時にまとめて翻訳
+      if (englishBuffer.trim()) {
+        translateWithGemini(englishBuffer);
+        englishBuffer = '';
+      }
+
       setStatus("停止中");
       document.getElementById('startBtn').disabled = false;
       document.getElementById('stopBtn').disabled = true;
@@ -475,6 +494,7 @@ Japanese:`;
       fullTranscript = '';
       finalJapaneseText = '';
       englishBuffer = '';
+      recentEnglishHistory = [];
       renderEnglish();
       renderJapanese();
     }
