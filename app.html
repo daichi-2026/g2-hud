@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v15.1 Dynamic Models)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v15.2 Strict Gemini Filter)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -91,7 +91,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v15.1 Fix</span>
+      <span class="badge">v15.2 Strict</span>
     </h2>
 
     <div>
@@ -150,7 +150,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v15.1] Safe model filtering initialized.</div>
+    <div id="logBox" class="log-box">[System v15.2] Strict Gemini filtering initialized.</div>
   </div>
 
   <script>
@@ -202,7 +202,7 @@
       document.getElementById('status').innerText = msg;
     }
 
-    // ★Gemini 利用可能モデルの自動取得関数（対応APIフィルタリング強化版）
+    // ★修正箇所：Gemini 利用可能モデルの自動取得関数（Gemma完全除外版）
     async function fetchAvailableModels() {
       const geminiKey = document.getElementById('geminiKey').value.trim();
       const selectEl = document.getElementById('geminiModelSelect');
@@ -225,17 +225,19 @@
         const data = await response.json();
         const models = data.models || [];
         
-        // generateContentに対応し、かつ現行で動作するモデル（2.0-flashや1.5-flash-002等）を抽出
         const validModels = models.filter(m => {
           const name = m.name.replace('models/', '');
           const hasGenerateContent = m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent");
           
-          // エラーが発生する旧表記、別API要求モデル(2.5等)、実験用モデルを除外
+          // 1. "gemini"という名前が含まれるモデルに限定（gemmaなどを除外）
+          const isGemini = name.includes('gemini');
+
+          // 2. エラーが発生する旧表記、別API要求モデル(2.5等)、実験用モデルを除外
           const isUnsupported = name === 'gemini-1.5-flash' || 
                                 name.includes('2.5') || 
                                 name.includes('experimental');
 
-          return hasGenerateContent && !isUnsupported;
+          return hasGenerateContent && isGemini && !isUnsupported;
         });
 
         if (validModels.length === 0) {
@@ -250,14 +252,13 @@
           opt.value = modelName;
           opt.textContent = `${modelName} (${m.displayName || ''})`;
           
-          // gemini-2.0-flash または gemini-1.5-flash-002 を優先的に初期選択
           if ((modelName.includes('2.0-flash') || modelName.includes('1.5-flash-002')) && !selectEl.value) {
             opt.selected = true;
           }
           selectEl.appendChild(opt);
         });
 
-        log("Models", `動作確認済みモデル ${validModels.length} 件の取得完了`);
+        log("Models", `動作確認済み(Gemini専用)モデル ${validModels.length} 件の取得完了`);
 
       } catch (e) {
         log("Error", `モデル取得例外: ${e.message}`);
