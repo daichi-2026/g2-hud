@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v14.8 Debug Output)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v15.0 Dynamic Models)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -52,17 +52,19 @@
       .side-panel { width: 340px; }
     }
     h2 { color: #00FF00; font-size: 14px; margin: 0 0 4px 0; display: flex; justify-content: space-between; align-items: center; }
-    .badge { background: #ff9900; color: #000; font-size: 9px; padding: 2px 5px; border-radius: 8px; font-weight: bold; }
-    input, button { background: #222; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px; font-size: 12px; width: 100%; }
+    .badge { background: #0088ff; color: #fff; font-size: 9px; padding: 2px 5px; border-radius: 8px; font-weight: bold; }
+    input, select, button { background: #222; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px; font-size: 12px; width: 100%; }
+    select { color: #00FFFF; font-weight: bold; }
     button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 10px; transition: background 0.2s; }
     button:hover { background: #00dd00; color: #000; }
     button.stop-btn { background: #cc3333; }
     button.stop-btn:hover { background: #ff4444; color: #fff; }
     button.gemini-btn { background: #0066cc; }
     button.gemini-btn:hover { background: #0088ff; }
+    button.small-btn { padding: 4px 8px; font-size: 10px; background: #333; border: 1px solid #555; }
     
     .status { font-size: 10px; color: #aaa; padding: 5px; background: #080808; border: 1px solid #222; border-radius: 4px; }
-    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 9px; height: 120px; overflow-y: auto; padding: 5px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 9px; height: 110px; overflow-y: auto; padding: 5px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
     
     .meter-container { background: #000; border: 1px solid #333; height: 10px; border-radius: 5px; overflow: hidden; position: relative; }
     .meter-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #00ff00 60%, #ffff00 85%, #ff0000 100%); transition: width 0.05s ease; }
@@ -89,7 +91,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v14.8 Verbose</span>
+      <span class="badge">v15.0 Dynamic</span>
     </h2>
 
     <div>
@@ -103,8 +105,18 @@
     </div>
 
     <div>
-      <label style="color:#0088FF; font-weight:bold;">Gemini API Key (Google AI Studio用):</label>
-      <input type="password" id="geminiKey" placeholder="AIzaSy...">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+        <label style="color:#0088FF; font-weight:bold;">Gemini API Key (AI Studio):</label>
+        <button onclick="fetchAvailableModels()" class="small-btn" style="width:auto;">🔄 モデル一覧取得</button>
+      </div>
+      <input type="password" id="geminiKey" placeholder="AIzaSy..." onchange="fetchAvailableModels()">
+    </div>
+
+    <div>
+      <label style="color:#00FFFF; font-weight:bold;">使用Geminiモデル (自動取得):</label>
+      <select id="geminiModelSelect">
+        <option value="">(APIキーを入力してモデルを取得...)</option>
+      </select>
     </div>
 
     <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
@@ -135,10 +147,10 @@
     <div id="status" class="status">待機中</div>
 
     <div style="display:flex; justify-content:space-between; align-items:center;">
-      <span style="font-weight:bold; color:#00FF00;">【詳細ログ（エラーデバッグ強化）】</span>
+      <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v14.8] Verbose error logging active.</div>
+    <div id="logBox" class="log-box">[System v15.0] Dynamic model selection ready.</div>
   </div>
 
   <script>
@@ -174,7 +186,10 @@
       if (savedGoogleKey) document.getElementById('googleTranslateKey').value = savedGoogleKey;
 
       const savedGeminiKey = localStorage.getItem('gemini_api_key');
-      if (savedGeminiKey) document.getElementById('geminiKey').value = savedGeminiKey;
+      if (savedGeminiKey) {
+        document.getElementById('geminiKey').value = savedGeminiKey;
+        fetchAvailableModels();
+      }
     });
 
     function log(tag, msg) {
@@ -185,6 +200,61 @@
 
     function setStatus(msg) {
       document.getElementById('status').innerText = msg;
+    }
+
+    // ★Gemini 利用可能モデルの自動取得関数
+    async function fetchAvailableModels() {
+      const geminiKey = document.getElementById('geminiKey').value.trim();
+      const selectEl = document.getElementById('geminiModelSelect');
+      if (!geminiKey) return;
+
+      localStorage.setItem('gemini_api_key', geminiKey);
+      log("Models", "利用可能モデル一覧を判定中...");
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`;
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          const errText = await response.text();
+          log("Error", `モデル取得失敗 (${response.status}): ${errText}`);
+          selectEl.innerHTML = `<option value="">(取得失敗: キーを確認してください)</option>`;
+          return;
+        }
+
+        const data = await response.json();
+        const models = data.models || [];
+        
+        // generateContent がサポートされているモデルのみを抽出
+        const validModels = models.filter(m => 
+          m.supportedGenerationMethods && 
+          m.supportedGenerationMethods.includes("generateContent")
+        );
+
+        if (validModels.length === 0) {
+          selectEl.innerHTML = `<option value="">(利用可能なテキストモデルがありません)</option>`;
+          return;
+        }
+
+        selectEl.innerHTML = '';
+        validModels.forEach(m => {
+          const modelName = m.name.replace('models/', '');
+          const opt = document.createElement('option');
+          opt.value = modelName;
+          opt.textContent = `${modelName} (${m.displayName || ''})`;
+          
+          // flashモデルを優先選択
+          if (modelName.includes('flash') && !selectEl.value) {
+            opt.selected = true;
+          }
+          selectEl.appendChild(opt);
+        });
+
+        log("Models", `利用可能モデル ${validModels.length} 件を取得しました。`);
+
+      } catch (e) {
+        log("Error", `モデル取得例外: ${e.message}`);
+      }
     }
 
     async function startProcessing() {
@@ -198,9 +268,6 @@
 
       localStorage.setItem('openai_api_key', openaiKey);
       localStorage.setItem('google_translate_api_key', googleKey);
-      
-      const geminiKey = document.getElementById('geminiKey').value.trim();
-      if (geminiKey) localStorage.setItem('gemini_api_key', geminiKey);
 
       try {
         const constraints = {
@@ -399,11 +466,17 @@
       }
     }
 
-    // ★Gemini API 呼び出し（詳細デバッグログ出力版）
+    // ★画面で選択されたモデルを使って要約呼び出し
     async function analyzeWithGemini(isManual = false) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
+      const selectedModel = document.getElementById('geminiModelSelect').value;
+
       if (!geminiKey) {
         if (isManual) alert("Gemini API Key を入力してください。");
+        return;
+      }
+      if (!selectedModel) {
+        if (isManual) alert("モデルを選択するか、「モデル一覧取得」ボタンを押してください。");
         return;
       }
       if (!fullTranscript.trim()) {
@@ -417,9 +490,9 @@
 
       const geminiDisplay = document.getElementById('geminiDisplay');
       if (isManual || !geminiSummaryText) {
-        geminiDisplay.innerText = "【Geminiが文脈・オチ・ニュアンスを解析中...】";
+        geminiDisplay.innerText = `【Gemini (${selectedModel}) が文脈を解析中...】`;
       }
-      log("Gemini", `要約送信中... (${isManual ? '手動' : '自動'})`);
+      log("Gemini", `要約リクエスト送信中 (${selectedModel})...`);
 
       const promptText = `
 以下の【英語原文】と【機械直訳】を総合的に分析し、直訳では分かりにくい文脈、一人芝居・ジョーク・比喩表現・話者の意図を補正した上で、わかりやすい日本語で出力してください。
@@ -435,7 +508,7 @@ ${fullTranscript}
 ${finalJapaneseText}
 `;
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${geminiKey}`;
 
       try {
         const response = await fetch(url, {
@@ -450,40 +523,25 @@ ${finalJapaneseText}
 
         const rawText = await response.text();
         let data;
-        try {
-          data = JSON.parse(rawText);
-        } catch (pErr) {
-          data = null;
-        }
+        try { data = JSON.parse(rawText); } catch (e) { data = null; }
 
         if (response.ok && data) {
           const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
           if (resultText) {
             geminiSummaryText = resultText;
             renderGemini();
-            log("Gemini Success", "gemini-1.5-flash より応答取得成功");
+            log("Gemini Success", `[${selectedModel}] 解析成功`);
           } else {
-            const warningMsg = `API応答200ですが本文が空です: ${rawText}`;
-            log("Gemini Warn", warningMsg);
-            geminiDisplay.innerText = warningMsg;
+            log("Gemini Warn", `応答本文が空です: ${rawText}`);
           }
         } else {
-          // 詳細エラー情報の完全吐き出し
-          const errStatus = response.status;
-          const errCode = data?.error?.code || 'N/A';
-          const errStatusText = data?.error?.status || 'N/A';
-          const errMsg = data?.error?.message || rawText || '不明なエラー';
-
-          const fullErrLog = `[HTTP ${errStatus}] Status: ${errStatusText} (Code: ${errCode})\nMessage: ${errMsg}`;
-          
-          log("Gemini ERROR", fullErrLog);
-          geminiDisplay.innerText = `【Gemini API エラー詳細】\n${fullErrLog}`;
+          const errMsg = data?.error?.message || rawText || 'エラーが発生しました';
+          log("Gemini ERROR", `[${response.status}] ${errMsg}`);
+          geminiDisplay.innerText = `【Gemini API エラー (${response.status})】\n${errMsg}`;
         }
-
       } catch (e) {
-        const fetchErr = `通信例外エラー: ${e.name} - ${e.message}`;
-        log("Gemini Fatal", fetchErr);
-        geminiDisplay.innerText = `【通信エラー】\n${fetchErr}`;
+        log("Gemini Fatal", `通信例外: ${e.message}`);
+        geminiDisplay.innerText = `【通信エラー】\n${e.message}`;
       } finally {
         isGeminiAnalyzing = false;
       }
