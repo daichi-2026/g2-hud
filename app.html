@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v12.3 System Prompt Clean)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v12.4 Flash-3.6 Optimized)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -76,7 +76,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v12.3 Clean</span>
+      <span class="badge">v12.4 Optimized</span>
     </h2>
 
     <div>
@@ -125,7 +125,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v12.3] System instruction separated. Clean translation mode ready.</div>
+    <div id="logBox" class="log-box">[System v12.4] Gemini 3.6 Flash thinking suppression and cleansing activated.</div>
   </div>
 
   <script>
@@ -198,7 +198,7 @@
             opt.value = model;
             opt.textContent = model;
             
-            if (model.includes("flash") && !defaultSelected) {
+            if (model.includes("3.6") && !defaultSelected) {
               opt.selected = true;
               defaultSelected = true;
             }
@@ -346,7 +346,6 @@
       formData.append("file", audioBlob, "audio.webm");
       formData.append("model", "whisper-1");
       formData.append("language", "en");
-      // Whisperに明確な句読点（ピリオド・カンマ）を含むテキストを出力させる誘導
       formData.append("prompt", "This is a continuous English speech. Use proper punctuation like periods and commas.");
 
       try {
@@ -393,12 +392,7 @@
 
     async function translateWithGemini(englishText) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
-      const selectedModel = document.getElementById('modelSelect').value;
-
-      if (!selectedModel) {
-        log("Error", "有効なGeminiモデルが選択されていません。");
-        return;
-      }
+      const selectedModel = document.getElementById('modelSelect').value || "gemini-3.6-flash";
 
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${geminiKey}`;
 
@@ -406,20 +400,18 @@
         ? `[Previous Context: ${recentEnglishHistory.join(' ')}]`
         : '';
 
-      // API構造の正当化: システムプロンプトとユーザーコンテンツを完全に分離
       const requestBody = {
         systemInstruction: {
           parts: [{
-            text: "You are a professional simultaneous interpreter. Translate the given English speech into natural, fluent Japanese suitable for a lecture transcript. Output ONLY the translated Japanese text. Never output explanations, multiple choices, notes, rules, markdown symbols, or bullet points."
+            text: "Task: Simultaneous interpreter. Translate English speech to natural, continuous Japanese. Output ONLY the translated Japanese text. ABSOLUTE PROHIBITION: No thinking processes, no draft labels (e.g. Draft 1), no notes, no lecture style headers, no markdown stars (*), no explanations."
           }]
         },
         contents: [{
           parts: [{
-            text: `${contextText}\nTranslate this English speech into Japanese:\n"${englishText}"`
+            text: `${contextText}\nTranslate this English speech to Japanese:\n"${englishText}"`
           }]
         }],
         generationConfig: { 
-          temperature: 0.1,
           maxOutputTokens: 250
         }
       };
@@ -435,13 +427,15 @@
           const data = await response.json();
           let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
           
-          // 万が一残ったメタ記述やプロンプト漏れの安全な除外処理
+          // Gemini 3.6 Flash の思考ログ・メタ注釈（Draft x: や /Lecture style 等）のクレンジング
           translatedText = translatedText
+            .replace(/^Draft\s*\d+:?/gi, '')          
+            .replace(/\/.*?style.*$/gmi, '')           
+            .replace(/^\*.*$/gm, '')                   
+            .replace(/^#+.*$/gm, '')                   
+            .replace(/^\d+\..*$/gm, '')                
             .replace(/^日本語訳[:：]?/g, '')
-            .replace(/^\*.*$/gm, '')
-            .replace(/^\d+\..*$/gm, '')
-            .replace(/^["'「」]/g, '')
-            .replace(/["'「」]$/g, '')
+            .replace(/^["'「」]/g, '').replace(/["'「」]$/g, '')
             .trim();
 
           if (translatedText) {
