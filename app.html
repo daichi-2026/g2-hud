@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v15.2 Strict Gemini Filter)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v15.3 Natural Numbered Translation)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -91,7 +91,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v15.2 Strict</span>
+      <span class="badge">v15.3 Numbered</span>
     </h2>
 
     <div>
@@ -150,7 +150,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v15.2] Strict Gemini filtering initialized.</div>
+    <div id="logBox" class="log-box">[System v15.3] Numbered translation formatting initialized.</div>
   </div>
 
   <script>
@@ -202,7 +202,6 @@
       document.getElementById('status').innerText = msg;
     }
 
-    // ★修正箇所：Gemini 利用可能モデルの自動取得関数（Gemma完全除外版）
     async function fetchAvailableModels() {
       const geminiKey = document.getElementById('geminiKey').value.trim();
       const selectEl = document.getElementById('geminiModelSelect');
@@ -229,10 +228,7 @@
           const name = m.name.replace('models/', '');
           const hasGenerateContent = m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent");
           
-          // 1. "gemini"という名前が含まれるモデルに限定（gemmaなどを除外）
           const isGemini = name.includes('gemini');
-
-          // 2. エラーが発生する旧表記、別API要求モデル(2.5等)、実験用モデルを除外
           const isUnsupported = name === 'gemini-1.5-flash' || 
                                 name.includes('2.5') || 
                                 name.includes('experimental');
@@ -474,6 +470,7 @@
       }
     }
 
+    // ★修正箇所：Geminiプロンプトの変更（文法解説を禁止し、番号順の意訳に特化）
     async function analyzeWithGemini(isManual = false) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
       const selectedModel = document.getElementById('geminiModelSelect').value;
@@ -502,11 +499,12 @@
       log("Gemini", `要約リクエスト送信中 (${selectedModel})...`);
 
       const promptText = `
-以下の【英語原文】と【機械直訳】を総合的に分析し、直訳では分かりにくい文脈、一人芝居・ジョーク・比喩表現・話者の意図を補正した上で、わかりやすい日本語で出力してください。
+以下の【英語原文】と【機械直訳】を総合的に分析し、文脈や話者の意図（ジョークや比喩など）を汲み取った「自然な意訳」を作成してください。
 
-1. 【全体要約】（箇条書き2〜3点）
-2. 【文脈を踏まえたスムーズな意訳】（自然な流れの日本語）
-3. 【補足・ニュアンス解説】（ジョークや比喩の補足）
+【厳守事項】
+・細かい文法解説や英単語・熟語の解説は絶対に不要です。
+・話の流れに沿って、意訳した文章を 1. 2. 3. ... と番号を振って出力してください。
+・直訳では伝わらない重要な背景知識やトピック（特定の人名、文化的なジョークなど）がある場合のみ、該当箇所の直下に「💡 補足:」として簡潔に記載してください。それ以外の不要なコメントは省いてください。
 
 【英語原文】
 ${fullTranscript}
