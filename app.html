@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v14.2 Robust Gemini)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v14.3 Fixed Endpoints)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -89,7 +89,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v14.2 Auto Gemini</span>
+      <span class="badge">v14.3 Fixed</span>
     </h2>
 
     <div>
@@ -104,7 +104,7 @@
 
     <div>
       <label style="color:#0088FF; font-weight:bold;">Gemini API Key (Google AI Studio用):</label>
-      <input type="password" id="geminiKey" placeholder="AIzaSy... (AI Studioで取得したキー)">
+      <input type="password" id="geminiKey" placeholder="AIzaSy...">
     </div>
 
     <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
@@ -138,7 +138,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v14.2] Enhanced error diagnostic for Gemini API.</div>
+    <div id="logBox" class="log-box">[System v14.3] API endpoint updated.</div>
   </div>
 
   <script>
@@ -400,7 +400,7 @@
       }
     }
 
-    // ★Gemini API 呼び出しロジック（エラー診断・自動修復付き）
+    // ★Gemini API 呼び出し（正式APIエンドポイント対応）
     async function analyzeWithGemini(isManual = false) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
       if (!geminiKey) {
@@ -436,12 +436,16 @@ ${fullTranscript}
 ${finalJapaneseText}
 `;
 
-      // 利用可能なモデル候補リスト（順次試行）
-      const models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'];
+      // APIエンドポイントの順次試行（v1形式 優先）
+      const endpoints = [
+        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+        `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${geminiKey}`
+      ];
+
       let success = false;
 
-      for (const model of models) {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+      for (const url of endpoints) {
         try {
           const response = await fetch(url, {
             method: 'POST',
@@ -455,21 +459,21 @@ ${finalJapaneseText}
             if (resultText) {
               geminiSummaryText = resultText;
               renderGemini();
-              log("Gemini", `解析完了 (モデル: ${model})`);
+              log("Gemini", "解析完了");
               success = true;
               break;
             }
           } else {
             const errData = await response.json();
-            log("Error", `モデル ${model} 失敗: ${errData.error?.message || response.statusText}`);
+            log("Error", `リクエスト失敗: ${errData.error?.message || response.statusText}`);
           }
         } catch (e) {
-          log("Error", `通信失敗 (${model}): ${e.message}`);
+          log("Error", `通信失敗: ${e.message}`);
         }
       }
 
       if (!success && isManual) {
-        geminiDisplay.innerText = "Gemini APIエラー: キーの有効性または権限を確認してください。\n(Google AI Studioで発行したキーが必要です)";
+        geminiDisplay.innerText = "Gemini APIの通信に失敗しました。詳細ログを確認してください。";
       }
       isGeminiAnalyzing = false;
     }
