@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v15.3 Natural Numbered Translation)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v15.4 with Web Speech API)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -84,14 +84,14 @@
     </div>
     <div class="display-box gemini">
       <div class="section-title">【自動文脈要約・意訳・背景解説 (GEMINI API)】</div>
-      <div id="geminiDisplay" class="content-area">(音声認識の進行に伴い、自動的に文脈解析結果が更新されます...)</div>
+      <div id="geminiDisplay" class="content-area">(音声認識の進行に伴い, 自動的に文脈解析結果が更新されます...)</div>
     </div>
   </div>
 
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v15.3 Numbered</span>
+      <span class="badge">v15.4 Speech</span>
     </h2>
 
     <div>
@@ -117,6 +117,12 @@
       <select id="geminiModelSelect">
         <option value="">(APIキーを入力してモデルを取得...)</option>
       </select>
+    </div>
+
+    <!-- 音声読み上げトグルスイッチ -->
+    <div style="background:#1a2a1a; padding:8px; border-radius:6px; border:1px solid #00aa00; display:flex; justify-content:space-between; align-items:center;">
+      <label style="color:#00FF00; font-weight:bold; cursor:pointer;" for="enableSpeech">🔊 和訳の音声読み上げ</label>
+      <input type="checkbox" id="enableSpeech" style="width:auto; cursor:pointer;" checked>
     </div>
 
     <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
@@ -150,7 +156,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v15.3] Numbered translation formatting initialized.</div>
+    <div id="logBox" class="log-box">[System v15.4] Web Speech API integration added.</div>
   </div>
 
   <script>
@@ -200,6 +206,22 @@
 
     function setStatus(msg) {
       document.getElementById('status').innerText = msg;
+    }
+
+    // Web Speech API を使った日本語読み上げ関数
+    function speakJapanese(text) {
+      const isEnabled = document.getElementById('enableSpeech').checked;
+      if (!isEnabled || !('speechSynthesis' in window)) return;
+
+      // 既存の読み上げをキャンセルして最新を優先
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ja-JP';
+      utterance.rate = 1.1; // 少し早めの読み上げ
+      utterance.pitch = 1.0;
+
+      window.speechSynthesis.speak(utterance);
     }
 
     async function fetchAvailableModels() {
@@ -254,7 +276,7 @@
           selectEl.appendChild(opt);
         });
 
-        log("Models", `動作確認済み(Gemini専用)モデル ${validModels.length} 件の取得完了`);
+        log("Models", `動作確認済みモデル ${validModels.length} 件の取得完了`);
 
       } catch (e) {
         log("Error", `モデル取得例外: ${e.message}`);
@@ -457,6 +479,9 @@
             renderJapanese();
             log("GoogleTrans", decodedText);
 
+            // ★ ここでWeb Speech APIによる音声読み上げを実行
+            speakJapanese(decodedText);
+
             if (finalJapaneseText.length - lastGeminiLength > 150) {
               analyzeWithGemini(false);
             }
@@ -470,7 +495,6 @@
       }
     }
 
-    // ★修正箇所：Geminiプロンプトの変更（文法解説を禁止し、番号順の意訳に特化）
     async function analyzeWithGemini(isManual = false) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
       const selectedModel = document.getElementById('geminiModelSelect').value;
@@ -504,7 +528,7 @@
 【厳守事項】
 ・細かい文法解説や英単語・熟語の解説は絶対に不要です。
 ・話の流れに沿って、意訳した文章を 1. 2. 3. ... と番号を振って出力してください。
-・直訳では伝わらない重要な背景知識やトピック（特定の人名、文化的なジョークなど）がある場合のみ、該当箇所の直下に「💡 補足:」として簡潔に記載してください。それ以外の不要なコメントは省いてください。
+・直訳では伝わらない重要な背景知識やトピックがある場合のみ、該当箇所の直下に「💡 補足:」として簡潔に記載してください。それ以外の不要なコメントは省いてください。
 
 【英語原文】
 ${fullTranscript}
@@ -591,6 +615,7 @@ ${finalJapaneseText}
     }
 
     function clearTranscript() {
+      window.speechSynthesis.cancel(); // 読み上げも停止
       fullTranscript = '';
       finalJapaneseText = '';
       englishBuffer = '';
