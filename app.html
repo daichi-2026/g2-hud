@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v14.3 Fixed Endpoints)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v14.4 Fixed Models)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -89,7 +89,7 @@
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v14.3 Fixed</span>
+      <span class="badge">v14.4 Fixed</span>
     </h2>
 
     <div>
@@ -138,7 +138,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v14.3] API endpoint updated.</div>
+    <div id="logBox" class="log-box">[System v14.4] Gemini fallback models configured.</div>
   </div>
 
   <script>
@@ -400,7 +400,7 @@
       }
     }
 
-    // ★Gemini API 呼び出し（正式APIエンドポイント対応）
+    // ★Gemini API 呼び出し（最新モデル・エンドポイントフォールバック対応）
     async function analyzeWithGemini(isManual = false) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
       if (!geminiKey) {
@@ -422,7 +422,7 @@
       }
       log("Gemini", `要約リクエスト送信中... (${isManual ? '手動' : '自動'})`);
 
-      const prompt = `
+      const promptText = `
 以下の【英語原文】と【機械直訳】を総合的に分析し、直訳では分かりにくい文脈、一人芝居・ジョーク・比喩表現・話者の意図を補正した上で、わかりやすい日本語で出力してください。
 
 1. 【全体要約】（箇条書き2〜3点）
@@ -436,21 +436,23 @@ ${fullTranscript}
 ${finalJapaneseText}
 `;
 
-      // APIエンドポイントの順次試行（v1形式 優先）
-      const endpoints = [
-        `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-        `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${geminiKey}`
+      // 利用可能なモデルとバージョンの優先順位リスト
+      const targets = [
+        { ver: 'v1beta', model: 'gemini-2.5-flash' },
+        { ver: 'v1beta', model: 'gemini-2.0-flash' },
+        { ver: 'v1beta', model: 'gemini-1.5-flash' },
+        { ver: 'v1', model: 'gemini-1.5-flash' }
       ];
 
       let success = false;
 
-      for (const url of endpoints) {
+      for (const t of targets) {
+        const url = `https://generativelanguage.googleapis.com/${t.ver}/models/${t.model}:generateContent?key=${geminiKey}`;
         try {
           const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
           });
 
           if (response.ok) {
@@ -459,21 +461,21 @@ ${finalJapaneseText}
             if (resultText) {
               geminiSummaryText = resultText;
               renderGemini();
-              log("Gemini", "解析完了");
+              log("Gemini", `解析完了 (${t.model})`);
               success = true;
               break;
             }
           } else {
             const errData = await response.json();
-            log("Error", `リクエスト失敗: ${errData.error?.message || response.statusText}`);
+            log("Error", `[${t.model}] ${errData.error?.message || response.statusText}`);
           }
         } catch (e) {
-          log("Error", `通信失敗: ${e.message}`);
+          log("Error", `[${t.model}] 通信失敗: ${e.message}`);
         }
       }
 
-      if (!success && isManual) {
-        geminiDisplay.innerText = "Gemini APIの通信に失敗しました。詳細ログを確認してください。";
+      if (!success) {
+        geminiDisplay.innerText = "Gemini APIの呼び出しに失敗しました。詳細ログを確認してください。";
       }
       isGeminiAnalyzing = false;
     }
