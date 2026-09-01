@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v14.0 Cloud Translation + Gemini)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v14.2 Robust Gemini)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -72,27 +72,24 @@
 <body>
 
   <div class="main-container">
-    <!-- 1. 英語音声認識 (Whisper) -->
     <div class="display-box">
       <div class="section-title">【リアルタイム英語文字起こし (WHISPER API)】</div>
       <div id="transcriptDisplay" class="content-area">(マイク入力を開始してください...)</div>
     </div>
-    <!-- 2. 即時直訳 (Google Cloud Translation) -->
     <div class="display-box japanese">
       <div class="section-title">【正確な日本語訳 (GOOGLE TRANSLATION API)】</div>
       <div id="translationDisplay" class="content-area">(文章の一区切りごとに高精度の翻訳が表示されます...)</div>
     </div>
-    <!-- 3. 文脈要約 (Gemini API) ※新規追加 -->
     <div class="display-box gemini">
-      <div class="section-title">【文脈要約・意訳・背景解説 (GEMINI API)】</div>
-      <div id="geminiDisplay" class="content-area">(「Geminiで文脈要約を実行」を押すと、原文と直訳を総合解析した要約が表示されます...)</div>
+      <div class="section-title">【自動文脈要約・意訳・背景解説 (GEMINI API)】</div>
+      <div id="geminiDisplay" class="content-area">(音声認識の進行に伴い、自動的に文脈解析結果が更新されます...)</div>
     </div>
   </div>
 
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v14.0 Cloud Trans + Gemini</span>
+      <span class="badge">v14.2 Auto Gemini</span>
     </h2>
 
     <div>
@@ -103,12 +100,11 @@
     <div>
       <label style="color:#00FF00; font-weight:bold;">Google Cloud API Key (翻訳用):</label>
       <input type="password" id="googleTranslateKey" placeholder="AIzaSy...">
-      <span style="font-size:9px; color:#888;">※ Cloud Translation API が有効なキー</span>
     </div>
 
     <div>
-      <label style="color:#0088FF; font-weight:bold;">Gemini API Key (要約用):</label>
-      <input type="password" id="geminiKey" placeholder="AIzaSy...">
+      <label style="color:#0088FF; font-weight:bold;">Gemini API Key (Google AI Studio用):</label>
+      <input type="password" id="geminiKey" placeholder="AIzaSy... (AI Studioで取得したキー)">
     </div>
 
     <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
@@ -126,7 +122,7 @@
       <button id="stopBtn" class="stop-btn" onclick="stopProcessing()" disabled>⏹ 停止</button>
     </div>
 
-    <button onclick="analyzeWithGemini()" class="gemini-btn">✨ Geminiで文脈要約を実行</button>
+    <button onclick="analyzeWithGemini(true)" class="gemini-btn">⚡ 今すぐ手動でGemini要約を実行</button>
 
     <div style="display:flex; gap:6px;">
       <button onclick="downloadTranscript()" style="background:#0088cc;">💾 TXT保存</button>
@@ -142,7 +138,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v14.0] Integrated Whisper + Google Translation + Gemini API engine.</div>
+    <div id="logBox" class="log-box">[System v14.2] Enhanced error diagnostic for Gemini API.</div>
   </div>
 
   <script>
@@ -166,6 +162,9 @@
     let finalJapaneseText = '';
     let englishBuffer = '';
     let geminiSummaryText = '';
+
+    let lastGeminiLength = 0;
+    let isGeminiAnalyzing = false;
 
     window.addEventListener('DOMContentLoaded', () => {
       const savedOpenaiKey = localStorage.getItem('openai_api_key');
@@ -205,11 +204,7 @@
 
       try {
         const constraints = {
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: true
-          }
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true }
         };
 
         audioStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -391,6 +386,10 @@
             finalJapaneseText += (finalJapaneseText ? '\n' : '') + decodedText;
             renderJapanese();
             log("GoogleTrans", decodedText);
+
+            if (finalJapaneseText.length - lastGeminiLength > 150) {
+              analyzeWithGemini(false);
+            }
           }
         } else {
           const err = await response.json();
@@ -401,28 +400,34 @@
       }
     }
 
-    // ★Gemini API 文脈要約・解析処理
-    async function analyzeWithGemini() {
+    // ★Gemini API 呼び出しロジック（エラー診断・自動修復付き）
+    async function analyzeWithGemini(isManual = false) {
       const geminiKey = document.getElementById('geminiKey').value.trim();
       if (!geminiKey) {
-        alert("Gemini API Key を入力してください。");
+        if (isManual) alert("Gemini API Key を入力してください。");
         return;
       }
       if (!fullTranscript.trim()) {
-        alert("解析対象の英文テキストがありません。");
+        if (isManual) alert("解析対象の英文テキストがありません。");
         return;
       }
+      if (isGeminiAnalyzing) return;
+
+      isGeminiAnalyzing = true;
+      lastGeminiLength = finalJapaneseText.length;
 
       const geminiDisplay = document.getElementById('geminiDisplay');
-      geminiDisplay.innerText = "【Geminiが文脈・オチ・ニュアンスを深層解析中...】";
-      log("Gemini", "要約リクエスト送信中...");
+      if (isManual || !geminiSummaryText) {
+        geminiDisplay.innerText = "【Geminiが文脈・オチ・ニュアンスを解析中...】";
+      }
+      log("Gemini", `要約リクエスト送信中... (${isManual ? '手動' : '自動'})`);
 
       const prompt = `
-以下の【英語原文】と【機械直訳】を総合的に分析し、直訳では掴みにくい文脈、一人芝居・ジョーク・比喩表現・話者の真の意図を補足した上で、以下のフォーマットで出力してください。
+以下の【英語原文】と【機械直訳】を総合的に分析し、直訳では分かりにくい文脈、一人芝居・ジョーク・比喩表現・話者の意図を補正した上で、わかりやすい日本語で出力してください。
 
 1. 【全体要約】（箇条書き2〜3点）
 2. 【文脈を踏まえたスムーズな意訳】（自然な流れの日本語）
-3. 【背景・ニュアンス解説】（ジョークの解説、比喩や口語表現の補足）
+3. 【補足・ニュアンス解説】（ジョークや比喩の補足）
 
 【英語原文】
 ${fullTranscript}
@@ -431,36 +436,42 @@ ${fullTranscript}
 ${finalJapaneseText}
 `;
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+      // 利用可能なモデル候補リスト（順次試行）
+      const models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'];
+      let success = false;
 
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-          })
-        });
+      for (const model of models) {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+          });
 
-        if (response.ok) {
-          const data = await response.json();
-          const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-          if (resultText) {
-            geminiSummaryText = resultText;
-            renderGemini();
-            log("Gemini", "解析完了");
+          if (response.ok) {
+            const data = await response.json();
+            const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            if (resultText) {
+              geminiSummaryText = resultText;
+              renderGemini();
+              log("Gemini", `解析完了 (モデル: ${model})`);
+              success = true;
+              break;
+            }
           } else {
-            geminiDisplay.innerText = "解析結果の取得に失敗しました。";
+            const errData = await response.json();
+            log("Error", `モデル ${model} 失敗: ${errData.error?.message || response.statusText}`);
           }
-        } else {
-          const err = await response.json();
-          log("Error", `Gemini APIエラー: ${err.error?.message || response.statusText}`);
-          geminiDisplay.innerText = "Gemini APIエラーが発生しました。";
+        } catch (e) {
+          log("Error", `通信失敗 (${model}): ${e.message}`);
         }
-      } catch (e) {
-        log("Error", `Gemini通信エラー: ${e.message}`);
-        geminiDisplay.innerText = "Gemini通信エラーが発生しました。";
       }
+
+      if (!success && isManual) {
+        geminiDisplay.innerText = "Gemini APIエラー: キーの有効性または権限を確認してください。\n(Google AI Studioで発行したキーが必要です)";
+      }
+      isGeminiAnalyzing = false;
     }
 
     function renderEnglish() {
@@ -492,6 +503,10 @@ ${finalJapaneseText}
         englishBuffer = '';
       }
 
+      if (fullTranscript.trim()) {
+        analyzeWithGemini(false);
+      }
+
       setStatus("停止中");
       document.getElementById('startBtn').disabled = false;
       document.getElementById('stopBtn').disabled = true;
@@ -502,6 +517,7 @@ ${finalJapaneseText}
       finalJapaneseText = '';
       englishBuffer = '';
       geminiSummaryText = '';
+      lastGeminiLength = 0;
       renderEnglish();
       renderJapanese();
       renderGemini();
