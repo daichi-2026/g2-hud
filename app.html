@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>リアルタイム英語認識・講義翻訳 (v12.4 Flash-3.6 Optimized)</title>
+  <title>リアルタイム英語認識・講義翻訳 (v13.0 Cloud Translation)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -47,13 +47,13 @@
     }
     h2 { color: #00FF00; font-size: 14px; margin: 0 0 4px 0; display: flex; justify-content: space-between; align-items: center; }
     .badge { background: #00FF00; color: #000; font-size: 9px; padding: 2px 5px; border-radius: 8px; font-weight: bold; }
-    input, select, button { background: #222; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px; font-size: 12px; width: 100%; }
+    input, button { background: #222; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px; font-size: 12px; width: 100%; }
     button { background: #00aa00; color: #fff; font-weight: bold; cursor: pointer; border: none; padding: 10px; transition: background 0.2s; }
     button:hover { background: #00dd00; color: #000; }
     button.stop-btn { background: #cc3333; }
     button.stop-btn:hover { background: #ff4444; color: #fff; }
     .status { font-size: 10px; color: #aaa; padding: 5px; background: #080808; border: 1px solid #222; border-radius: 4px; }
-    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 9px; height: 80px; overflow-y: auto; padding: 5px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+    .log-box { background: #000; border: 1px solid #333; color: #66ff66; font-family: monospace; font-size: 9px; height: 100px; overflow-y: auto; padding: 5px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
     
     .meter-container { background: #000; border: 1px solid #333; height: 10px; border-radius: 5px; overflow: hidden; position: relative; }
     .meter-bar { height: 100%; width: 0%; background: linear-gradient(90deg, #00ff00 60%, #ffff00 85%, #ff0000 100%); transition: width 0.05s ease; }
@@ -68,15 +68,15 @@
       <div id="transcriptDisplay" class="content-area">(マイク入力を開始してください...)</div>
     </div>
     <div class="display-box japanese">
-      <div class="section-title">【自然な日本語訳 (GEMINI 文脈補正版)】</div>
-      <div id="translationDisplay" class="content-area">(文章の一区切りごとに翻訳が表示されます...)</div>
+      <div class="section-title">【正確な日本語訳 (GOOGLE TRANSLATION API)】</div>
+      <div id="translationDisplay" class="content-area">(文章の一区切りごとに高精度の翻訳が表示されます...)</div>
     </div>
   </div>
 
   <div class="side-panel">
     <h2>
       <span>英語講義翻訳アシスト</span>
-      <span class="badge">v12.4 Optimized</span>
+      <span class="badge">v13.0 Cloud Trans</span>
     </h2>
 
     <div>
@@ -85,15 +85,9 @@
     </div>
 
     <div>
-      <label style="color:#00FF00; font-weight:bold;">Gemini API Key (翻訳用):</label>
-      <input type="password" id="geminiKey" placeholder="AIzaSy..." onchange="fetchAvailableModels()">
-    </div>
-
-    <div>
-      <label style="color:#00FF00; font-weight:bold;">Gemini モデル選択 (自動取得):</label>
-      <select id="modelSelect">
-        <option value="">API Key入力後に自動読み込み...</option>
-      </select>
+      <label style="color:#00FF00; font-weight:bold;">Google Cloud API Key (翻訳用):</label>
+      <input type="password" id="googleTranslateKey" placeholder="AIzaSy...">
+      <span style="font-size:9px; color:#888;">※ Cloud Translation API が有効なキー</span>
     </div>
 
     <div style="background:#111; padding:6px; border-radius:6px; border:1px solid #222;">
@@ -125,7 +119,7 @@
       <span style="font-weight:bold; color:#00FF00;">【詳細ログ】</span>
       <button onclick="clearLog()" style="padding:2px 6px; font-size:9px; background:#444; width:auto;">クリア</button>
     </div>
-    <div id="logBox" class="log-box">[System v12.4] Gemini 3.6 Flash thinking suppression and cleansing activated.</div>
+    <div id="logBox" class="log-box">[System v13.0] Switched to Google Cloud Translation API v2 Engine. High-speed & Zero garbage logs.</div>
   </div>
 
   <script>
@@ -148,17 +142,13 @@
     let fullTranscript = '';
     let finalJapaneseText = '';
     let englishBuffer = '';
-    let recentEnglishHistory = [];
 
     window.addEventListener('DOMContentLoaded', () => {
       const savedOpenaiKey = localStorage.getItem('openai_api_key');
       if (savedOpenaiKey) document.getElementById('openaiKey').value = savedOpenaiKey;
       
-      const savedGeminiKey = localStorage.getItem('gemini_api_key');
-      if (savedGeminiKey) {
-        document.getElementById('geminiKey').value = savedGeminiKey;
-        fetchAvailableModels();
-      }
+      const savedGoogleKey = localStorage.getItem('google_translate_api_key');
+      if (savedGoogleKey) document.getElementById('googleTranslateKey').value = savedGoogleKey;
     });
 
     function log(tag, msg) {
@@ -171,63 +161,17 @@
       document.getElementById('status').innerText = msg;
     }
 
-    async function fetchAvailableModels() {
-      const geminiKey = document.getElementById('geminiKey').value.trim();
-      if (!geminiKey) return;
-
-      const selectEl = document.getElementById('modelSelect');
-      
-      try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`);
-        if (!res.ok) {
-          log("Error", "モデル一覧の取得に失敗しました。API Keyを確認してください。");
-          return;
-        }
-
-        const data = await res.json();
-        const generateModels = (data.models || [])
-          .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"))
-          .map(m => m.name.replace("models/", ""));
-
-        if (generateModels.length > 0) {
-          selectEl.innerHTML = ""; 
-          let defaultSelected = false;
-
-          generateModels.forEach(model => {
-            const opt = document.createElement("option");
-            opt.value = model;
-            opt.textContent = model;
-            
-            if (model.includes("3.6") && !defaultSelected) {
-              opt.selected = true;
-              defaultSelected = true;
-            }
-            selectEl.appendChild(opt);
-          });
-
-          if (!defaultSelected) selectEl.selectedIndex = 0;
-          log("System", `利用可能なGeminiモデル（${generateModels.length}件）を取得しました。`);
-        }
-      } catch (e) {
-        log("Error", `モデル一覧取得エラー: ${e.message}`);
-      }
-    }
-
     async function startProcessing() {
       const openaiKey = document.getElementById('openaiKey').value.trim();
-      const geminiKey = document.getElementById('geminiKey').value.trim();
-      if (!openaiKey || !geminiKey) {
-        alert("API Keyを入力してください。");
+      const googleKey = document.getElementById('googleTranslateKey').value.trim();
+      
+      if (!openaiKey || !googleKey) {
+        alert("OpenAI API Key と Google Cloud API Key の両方を入力してください。");
         return;
       }
 
       localStorage.setItem('openai_api_key', openaiKey);
-      localStorage.setItem('gemini_api_key', geminiKey);
-
-      const selectEl = document.getElementById('modelSelect');
-      if (!selectEl.value || selectEl.value.includes("自動読み込み")) {
-        await fetchAvailableModels();
-      }
+      localStorage.setItem('google_translate_api_key', googleKey);
 
       try {
         const constraints = {
@@ -379,10 +323,10 @@
         const words = englishBuffer.split(/\s+/);
         const hasSentenceEnd = /[.?!]/.test(englishBuffer);
 
-        if (hasSentenceEnd || words.length >= 15) {
+        if (hasSentenceEnd || words.length >= 12) {
           const textToTranslate = englishBuffer;
           englishBuffer = ''; 
-          await translateWithGemini(textToTranslate);
+          await translateWithGoogleCloud(textToTranslate);
         }
 
       } catch (e) {
@@ -390,68 +334,47 @@
       }
     }
 
-    async function translateWithGemini(englishText) {
-      const geminiKey = document.getElementById('geminiKey').value.trim();
-      const selectedModel = document.getElementById('modelSelect').value || "gemini-3.6-flash";
+    // Google Cloud Translation API (Basic v2) 呼び出し処理
+    async function translateWithGoogleCloud(englishText) {
+      const googleKey = document.getElementById('googleTranslateKey').value.trim();
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${geminiKey}`;
-
-      const contextText = recentEnglishHistory.length > 0 
-        ? `[Previous Context: ${recentEnglishHistory.join(' ')}]`
-        : '';
-
-      const requestBody = {
-        systemInstruction: {
-          parts: [{
-            text: "Task: Simultaneous interpreter. Translate English speech to natural, continuous Japanese. Output ONLY the translated Japanese text. ABSOLUTE PROHIBITION: No thinking processes, no draft labels (e.g. Draft 1), no notes, no lecture style headers, no markdown stars (*), no explanations."
-          }]
-        },
-        contents: [{
-          parts: [{
-            text: `${contextText}\nTranslate this English speech to Japanese:\n"${englishText}"`
-          }]
-        }],
-        generationConfig: { 
-          maxOutputTokens: 250
-        }
-      };
+      const url = `https://translation.googleapis.com/language/translate/v2?key=${googleKey}`;
 
       try {
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify({
+            q: englishText,
+            source: 'en',
+            target: 'ja',
+            format: 'text'
+          })
         });
 
         if (response.ok) {
           const data = await response.json();
-          let translatedText = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-          
-          // Gemini 3.6 Flash の思考ログ・メタ注釈（Draft x: や /Lecture style 等）のクレンジング
-          translatedText = translatedText
-            .replace(/^Draft\s*\d+:?/gi, '')          
-            .replace(/\/.*?style.*$/gmi, '')           
-            .replace(/^\*.*$/gm, '')                   
-            .replace(/^#+.*$/gm, '')                   
-            .replace(/^\d+\..*$/gm, '')                
-            .replace(/^日本語訳[:：]?/g, '')
-            .replace(/^["'「」]/g, '').replace(/["'「」]$/g, '')
-            .trim();
+          const translatedText = data.data?.translations?.[0]?.translatedText || '';
 
           if (translatedText) {
-            finalJapaneseText += (finalJapaneseText ? '\n' : '') + translatedText;
-            renderJapanese();
-            log("Gemini", translatedText);
+            // HTMLエンティティ表記のデコード（例: &#39; -> '）
+            const parser = new DOMParser();
+            const decodedText = parser.parseFromString(translatedText, 'text/html').body.textContent;
 
-            recentEnglishHistory.push(englishText);
-            if (recentEnglishHistory.length > 2) recentEnglishHistory.shift();
+            finalJapaneseText += (finalJapaneseText ? '\n' : '') + decodedText;
+            renderJapanese();
+            log("GoogleTrans", decodedText);
           }
         } else {
           const err = await response.json();
-          log("Error", `Gemini APIエラー: ${err.error?.message || response.statusText}`);
+          log("Error", `Google Translate APIエラー: ${err.error?.message || response.statusText}`);
+          
+          if (err.error?.message?.includes("API has not been used")) {
+            alert("Google Cloud Consoleで『Cloud Translation API』が無効になっています。有効化してください。");
+          }
         }
       } catch (e) {
-        log("Error", `Gemini通信エラー: ${e.message}`);
+        log("Error", `Google Translate通信エラー: ${e.message}`);
       }
     }
 
@@ -474,7 +397,7 @@
       if (audioStream) audioStream.getTracks().forEach(t => t.stop());
 
       if (englishBuffer.trim()) {
-        translateWithGemini(englishBuffer);
+        translateWithGoogleCloud(englishBuffer);
         englishBuffer = '';
       }
 
@@ -487,7 +410,6 @@
       fullTranscript = '';
       finalJapaneseText = '';
       englishBuffer = '';
-      recentEnglishHistory = [];
       renderEnglish();
       renderJapanese();
     }
